@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
+import Mr from '../models/Mr.js';
 import Organization from '../models/Organization.js';
 
 export const auth = async (req, res, next) => {
@@ -8,7 +8,7 @@ export const auth = async (req, res, next) => {
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await User.findById(decoded.id);
+    req.mr = await Mr.findById(decoded.id);
     next();
   } catch {
     return res.status(401).json({ message: 'Unauthorized' });
@@ -17,11 +17,11 @@ export const auth = async (req, res, next) => {
 
 export const orgAuth = async (req, res, next) => {
   try {
-    const token = req.cookies.token;
+    const token = req.cookies.orgToken;
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.organization= await Organization.findById(decoded.id);
+    req.organization = await Organization.findById(decoded.id);
     next();
   } catch {
     return res.status(401).json({ message: 'Unauthorized' });

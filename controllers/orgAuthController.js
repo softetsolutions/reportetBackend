@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 
 const generateOrgToken = (id) => {
-  return jwt.sign({ id, type: 'org' }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign( {id} , process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
 export const orgRegister = async (req, res) => {
@@ -45,7 +45,7 @@ export const orgLogin = async (req, res) => {
 
     res.status(200).json({
       message: 'Login successful',
-      org: { id: org._id, name: org.name, email: org.email },
+      token: token,
     });
   } catch (error) {
     console.error('Org Login Error:', error);

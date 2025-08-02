@@ -1,10 +1,11 @@
 import express from 'express';
-import { auth,  } from '../middleware/authMiddleware.js';
-import { getAssignedDoctors, addRemark } from '../controllers/mrController.js';
+import { orgAuth } from '../middleware/authMiddleware.js';
+import { getAllMrs,createMr,getMrByAreaId } from '../controllers/mrController.js';
 
 const router = express.Router();
-router.use(auth, );
-router.get('/doctors', getAssignedDoctors);
-router.post('/remark', addRemark);
+router.use(orgAuth);
+router.get('/getall', getAllMrs);
+router.post('/create', createMr);
+router.get('/getByAreaId/:areaId', getMrByAreaId);
 
 export default router;
