@@ -9,6 +9,10 @@ const generateOrgToken = (id) => {
 export const orgRegister = async (req, res) => {
   try {
     const { organizationName, email, password } = req.body;
+    const existingOrg = await Organization.findOne({ email });
+    if (existingOrg) {
+      return res.status(400).json({ message: 'Email already exists' });
+    }
     const hashed = await bcrypt.hash(password, 10);
     const org = await Organization.create({ organizationName, email, password: hashed });
 

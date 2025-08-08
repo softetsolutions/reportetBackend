@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const locationSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, unique: true },
+    name: { type: String, required: true},
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",

@@ -11,6 +11,8 @@ import saleRoutes from "./routes/saleRoutes.js";
 import dailyVisitRoutes from "./routes/daily-visit.js";
 import doctorRoutes from "./routes/doctorRoutes.js";
 import areaRouts from "./routes/areaRoutes.js";
+import swaggerUi from 'swagger-ui-express';
+import yaml from 'yamljs';
 
 dotenv.config();
 const app = express();
@@ -22,6 +24,10 @@ app.use(
     credentials: true,
   })
 );
+
+
+const swaggerDocument = yaml.load('./swagger.yaml');
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/orgauth", orgRoutes);

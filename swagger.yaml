@@ -1,0 +1,812 @@
+openapi: 3.0.0
+info:
+  title: REPORTET APIS
+  version: 1.0.0
+  description: API documentation 
+servers:
+  - url: http://localhost:5000
+    description: Local server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+
+# Area routes
+paths:
+  /api/area/add:
+    post:
+      tags:
+        - Area
+      summary: Add multiple areas
+      description: Accepts an array of area names and adds them if they don't already exist for the organization.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - names
+              properties:
+                names:
+                  type: array
+                  items:
+                    type: string
+                  example: ["Delhi", "Mumbai", "Chennai"]
+      responses:
+        '201':
+          description: Areas processed successfully
+        '400':
+          description: Invalid input or duplicate entries
+        '500':
+          description: Server error
+
+  /api/area/assign:
+    post:
+      tags:
+        - Area
+      summary: Assign an area to an MR
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - mrId
+                - areaId
+              properties:
+                mrId:
+                  type: string
+                  example: 64f82cda2e5a0f0011e29ba4
+                areaId:
+                  type: string
+                  example: 64f82cda2e5a0f0011e29a67
+      responses:
+        '200':
+          description: Area assigned successfully
+        '400':
+          description: Missing mrId or areaId
+        '404':
+          description: MR not found
+        '500':
+          description: Server error
+
+  /api/area:
+    get:
+      tags:
+        - Area
+      summary: Get all areas for the organization
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of areas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Area'
+        '404':
+          description: No areas found
+        '500':
+          description: Server error
+
+  /api/area/{id}:
+    get:
+      tags:
+        - Area
+      summary: Get area by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Area ID
+      responses:
+        '200':
+          description: Area found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Area'
+        '404':
+          description: Area not found
+        '500':
+          description: Server error
+
+  /api/area/import:
+    post:
+      tags:
+        - Area
+      summary: Import areas from Excel file
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Areas imported successfully
+        '500':
+          description: Failed to import areas
+
+
+#auth routes
+
+  /api/auth/login:
+    post:
+      summary: Login user (MR)
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - userName
+                - password
+              properties:
+                userName:
+                  type: string
+                  example: mr123
+                password:
+                  type: string
+                  example: yourpassword
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  token:
+                    type: string
+        "401":
+          description: Invalid credentials
+        "500":
+          description: Server error
+
+  /api/auth/logout:
+    post:
+      summary: Logout user
+      tags:
+        - Auth
+      responses:
+        "200":
+          description: Logout successful
+        "500":
+          description: Server error
+
+# Daily Visits routes
+  paths:
+  /daily-visit/create:
+    post:
+      tags:
+        - DailyVisit
+      summary: Create a daily visit
+      description: Creates a new daily visit record for the authenticated MR.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                date:
+                  type: string
+                  format: date
+                  example: "2025-08-07"
+                areaId:
+                  type: string
+                  example: "64c73a5bdbf2394a9987cd12"
+                doctorId:
+                  type: string
+                  example: "64d6e87a4adff4541b9a6fc3"
+                remark:
+                  type: string
+                  example: "Discussed medication updates"
+              required:
+                - date
+                - areaId
+                - doctorId
+                - remark
+      responses:
+        '201':
+          description: Daily visit created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Daily visit created successfully
+                  dailyVisit:
+                    $ref: '#/components/schemas/DailyVisit'
+        '400':
+          description: Validation error
+        '500':
+          description: Server error
+
+# doctor routes
+  paths:
+  /api/doctor/add:
+    post:
+      tags:
+        - Doctor
+      summary: Add multiple doctors
+      description: Adds an array of doctors for the organization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                doctors:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - specialty
+                      - areaId
+                    properties:
+                      name:
+                        type: string
+                        example: "Dr. John Doe"
+                      specialty:
+                        type: string
+                        example: "Cardiology"
+                      areaId:
+                        type: string
+                        example: "64f0c1a302f4c7ae7e6b145a"
+      responses:
+        '201':
+          description: Doctors processed successfully
+        '400':
+          description: Validation error
+        '500':
+          description: Server error
+
+  /api/doctor/getAll:
+    get:
+      tags:
+        - Doctor
+      summary: Get all doctors
+      description: Retrieves all doctors for the authenticated organization.
+      responses:
+        '200':
+          description: List of doctors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Doctor'
+        '404':
+          description: No doctors found
+        '500':
+          description: Server error
+
+  /api/doctor/getByAreaId/{areaId}:
+    get:
+      tags:
+        - Doctor
+      summary: Get doctors by areaId
+      parameters:
+        - name: areaId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Area ID to filter doctors
+      responses:
+        '200':
+          description: List of doctors in the area
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Doctor'
+        '404':
+          description: No doctors found for this area
+        '500':
+          description: Server error
+
+  /api/doctor/assignToMR:
+    post:
+      tags:
+        - Doctor
+      summary: Assign a doctor to an MR
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - mrId
+                - doctorId
+              properties:
+                mrId:
+                  type: string
+                  example: "64f0c1a302f4c7ae7e6b145b"
+                doctorId:
+                  type: string
+                  example: "64f0c1a302f4c7ae7e6b145a"
+      responses:
+        '200':
+          description: MR updated successfully
+        '400':
+          description: Validation error
+        '404':
+          description: MR or Doctor not found
+        '500':
+          description: Server error
+
+  /api/doctor/import:
+    post:
+      tags:
+        - Doctor
+      summary: Import doctors from Excel file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Number of doctors imported
+        '500':
+          description: Server error
+
+
+  #mr routes
+  /api/mr/create:
+    post:
+      tags:
+        - MR
+      summary: Create a new MR
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - firstName
+                - lastName
+                - userName
+                - password
+              properties:
+                firstName:
+                  type: string
+                  example: "John"
+                lastName:
+                  type: string
+                  example: "Doe"
+                userName:
+                  type: string
+                  example: "johndoe123"
+                password:
+                  type: string
+                  example: "strongpassword123"
+      responses:
+        '201':
+          description: MR created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mr'
+        '400':
+          description: Missing fields or invalid input
+        '500':
+          description: Server error
+
+  /api/mr/getall:
+    get:
+      tags:
+        - MR
+      summary: Get all MRs for the organization
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: A list of MRs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Mr'
+        '500':
+          description: Server error
+
+  /api/mr/getByAreaId/{areaId}:
+    get:
+      tags:
+        - MR
+      summary: Get MRs by area ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: areaId
+          required: true
+          schema:
+            type: string
+          description: Area ID to filter MRs
+      responses:
+        '200':
+          description: MRs in the given area
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    _id:
+                      type: string
+                      example: "64ecf7d0724e9b10f2d8b9c3"
+                    displayName:
+                      type: string
+                      example: "John Doe"
+        '404':
+          description: No MRs found
+        '500':
+          description: Server error
+
+
+  #organization routes
+  /api/orgauth/register:
+    post:
+      tags:
+        - Organization
+      summary: Register a new organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - organizationName
+                - email
+                - password
+              properties:
+                organizationName:
+                  type: string
+                  example: Softet Solutions
+                email:
+                  type: string
+                  format: email
+                  example: admin@softetsolutions.com
+                password:
+                  type: string
+                  format: password
+                  example: strongpassword123
+      responses:
+        '201':
+          description: Organization registered successfully
+        '400':
+          description: Email already exists
+        '500':
+          description: Internal server error
+
+  /api/orgauth/login:
+    post:
+      tags:
+        - Organization
+      summary: Login as organization admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  example: admin@softetsolutions.com
+                password:
+                  type: string
+                  example: strongpassword123
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Login successful
+                  token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        '401':
+          description: Invalid credentials
+        '500':
+          description: Server error
+
+
+# sale routes
+  /api/sale:
+    post:
+      tags:
+        - Sale
+      summary: Create a new sale record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - date
+                - stockist
+                - month
+                - saleAmount
+                - organizationId
+              properties:
+                date:
+                  type: string
+                  format: date
+                  example: "2025-08-07"
+                stockist:
+                  type: string
+                  example: "64f7a00e2e5a0f0011e28e00"
+                month:
+                  type: string
+                  example: "August"
+                saleAmount:
+                  type: number
+                  example: 12345
+                organizationId:
+                  type: string
+                  example: "64f79ffb2e5a0f0011e28df9"
+      responses:
+        '201':
+          description: Sale created successfully
+        '400':
+          description: Validation or creation error
+
+    get:
+      tags:
+        - Sale
+      summary: Get all sales (optional search by stockist name)
+      parameters:
+        - in: query
+          name: search
+          schema:
+            type: string
+          description: Search by stockist name (case-insensitive)
+      responses:
+        '200':
+          description: A list of sales
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Sale'
+        '500':
+          description: Server error
+
+  /api/sale/{id}:
+    put:
+      tags:
+        - Sale
+      summary: Update a sale record
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Sale ID to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                date:
+                  type: string
+                  format: date
+                  example: "2025-08-07"
+                stockist:
+                  type: string
+                  example: "64f7a00e2e5a0f0011e28e00"
+                month:
+                  type: string
+                  example: "August"
+                saleAmount:
+                  type: number
+                  example: 54321
+                organizationId:
+                  type: string
+                  example: "64f79ffb2e5a0f0011e28df9"
+      responses:
+        '200':
+          description: Sale updated successfully
+        '400':
+          description: Update error
+
+    delete:
+      tags:
+        - Sale
+      summary: Delete a sale record
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Sale ID to delete
+      responses:
+        '200':
+          description: Sale deleted successfully
+        '400':
+          description: Deletion error
+
+
+#stockist routes
+  paths:
+  /api/stockist:
+    post:
+      tags:
+        - Stockist
+      summary: Create a new stockist
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: MedCare Stockist
+                address:
+                  type: string
+                  example: 123 Main St, Delhi
+                state:
+                  type: string
+                  example: Delhi
+                gstNo:
+                  type: string
+                  example: GSTIN12345
+      responses:
+        '201':
+          description: Stockist created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stockist'
+        '400':
+          description: Validation or creation error
+
+    get:
+      tags:
+        - Stockist
+      summary: Get all stockists for the logged-in organization
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: A list of stockists
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Stockist'
+        '400':
+          description: Error fetching stockists
+
+  /api/stockist/{id}:
+    put:
+      tags:
+        - Stockist
+      summary: Update a stockist
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: Stockist ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Updated Stockist
+                address:
+                  type: string
+                  example: New Address
+                state:
+                  type: string
+                  example: Maharashtra
+                gstNo:
+                  type: string
+                  example: NEWGST123
+      responses:
+        '200':
+          description: Stockist updated
+        '400':
+          description: Update error
+
+    delete:
+      tags:
+        - Stockist
+      summary: Delete a stockist
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: Stockist ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted successfully
+        '400':
+          description: Deletion error

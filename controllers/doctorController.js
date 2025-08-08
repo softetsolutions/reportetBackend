@@ -7,22 +7,66 @@ import Area from "../models/Area.js";
 
 export const addDoctor = async (req, res) => {
   try {
-    const { name, specialty, areaId } = req.body;
+    const { doctors } = req.body;
 
-    if (!name || !specialty || !areaId) {
-      return res
-        .status(400)
-        .json({ message: "Name, specialty, and areaId are required" });
+    if (!Array.isArray(doctors) || doctors.length === 0) {
+      return res.status(400).json({ message: "Please provide an array of doctors." });
     }
 
-    const doctor = await Doctor.create({ name, specialty, areaId, organizationId: req.organization._id });
-    res.status(201).json(doctor);
+    const validDoctors = [];
+    const skippedDoctors = [];
+
+    // Fetch all valid areaIds once to minimize DB queries
+    const areaIds = doctors.map(doc => doc.areaId).filter(id => !!id);
+    const validAreaIds = new Set(
+      (
+        await Area.find({
+          _id: { $in: areaIds },
+          organizationId: req.organization._id,
+        }).select("_id")
+      ).map(area => area._id.toString())
+    );
+
+    for (const doc of doctors) {
+      const { name, specialty, areaId } = doc;
+
+      if (!name || !specialty || !areaId) {
+        skippedDoctors.push({ ...doc, reason: "Missing required fields" });
+        continue;
+      }
+
+      if (!validAreaIds.has(areaId)) {
+        skippedDoctors.push({ ...doc, reason: "Invalid or unauthorized areaId" });
+        continue;
+      }
+
+      validDoctors.push({
+        name,
+        specialty,
+        areaId,
+        organizationId: req.organization._id,
+      });
+    }
+
+    let insertedDoctors = [];
+    if (validDoctors.length > 0) {
+      insertedDoctors = await Doctor.insertMany(validDoctors);
+    }
+
+    res.status(201).json({
+      message: "Doctors processed successfully.",
+      inserted: insertedDoctors,
+      skipped: skippedDoctors,
+    });
+
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to add doctor", error: error.message });
+    res.status(500).json({
+      message: "Failed to add doctors",
+      error: error.message,
+    });
   }
 };
+
 
 export const assignDoctorToMR = async (req, res) => {
   try {
@@ -39,7 +83,14 @@ export const assignDoctorToMR = async (req, res) => {
       organizationId: req.organization._id,
     });
 
+    const doctor = await Doctor.findOne({
+      _id: doctorId,
+      organizationId: req.organization._id,
+    });
+
     if (!user) return res.status(404).json({ message: "User not found" });
+    
+    if (!doctor) return res.status(404).json({ message: "Doctor not found" });
 
     user.assignedDoctors.push(doctorId);
     await user.save();
@@ -73,7 +124,11 @@ export const getDoctorsByAreaId = async (req, res) => {
 export const getAllDoctors = async (req, res) => {
   try {
     const doctors = await Doctor.find({ organizationId: req.organization._id }).select("name specialty _id");
-    res.json(doctors);
+
+    if (doctors.length === 0) {
+      return res.status(404).json({ message: "No doctors found" });
+    }
+    res.status(200).json(doctors);
   } catch (error) {
     res
       .status(500)

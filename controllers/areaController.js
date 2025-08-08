@@ -5,25 +5,48 @@ import ExcelJS from 'exceljs';
 
 export const addArea = async (req, res) => {
   try {
-    const { name } = req.body;
-    if (!name) {
-      return res.status(400).json({ message: "Area name is required" });
+    const { names } = req.body;
+
+    if (!Array.isArray(names) || names.length === 0) {
+      return res.status(400).json({ message: "Please provide an array of area names." });
     }
-    const existing = await Area.findOne({name:name});
-    if (existing) {
-      return res.status(400).json({ message: "Area already exists" });
-    }
-    const area = await Area.create({
-      name,
+
+    const uniqueNames = [...new Set(names)];
+
+    // Find existing areas for the current organization
+    const existingAreas = await Area.find({
+      name: { $in: uniqueNames },
       organizationId: req.organization._id,
     });
-    res.status(201).json(area);
+
+    const existingNames = existingAreas.map(area => area.name);
+
+    // Filter only new area names
+    const namesToInsert = uniqueNames.filter(name => !existingNames.includes(name));
+
+    let insertedAreas = [];
+    if (namesToInsert.length > 0) {
+      const areasToCreate = namesToInsert.map(name => ({
+        name,
+        organizationId: req.organization._id,
+      }));
+      insertedAreas = await Area.insertMany(areasToCreate);
+    }
+
+    res.status(201).json({
+      message: "Areas processed successfully.",
+      inserted: insertedAreas,
+      skipped: existingNames,
+    });
+
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to add area", error: error.message });
+    res.status(500).json({
+      message: "Failed to add areas",
+      error: error.message,
+    });
   }
 };
+
 
 export const assignAreaToMR = async (req, res) => {
   try {
