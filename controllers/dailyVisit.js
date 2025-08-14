@@ -21,3 +21,35 @@ export const createDailyVisit = async (req, res) => {
     res.status(500).json({ message: 'Failed to create daily visit', error: error.message });
   }
 }
+
+export const getDoctorsWithRemarks = async (req, res) => {
+  try {
+    const { mrId, areaId, startDate, endDate } = req.query;
+
+    if (!mrId || !areaId || !startDate || !endDate) {
+      return res.status(400).json({ message: "mrId, areaId, startDate, and endDate are required" });
+    }
+
+    const visits = await DailyVisit.find({
+      mrId,
+      areaId,
+      date: {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      }
+    })
+    .populate("doctorId", "name _id").select("doctorId remark -_id"); 
+
+    if (!visits.length) {
+      return res.status(404).json({ message: "No visits found" });
+    }
+
+    res.status(200).json(visits);
+
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to retrieve doctors with remarks",
+      error: error.message
+    });
+  }
+};

@@ -50,7 +50,10 @@ export const getMrByAreaId = async (req, res) => {
 export const getAllMrs = async (req, res) => {
   try {
     const mrs = await Mr.find({ organizationId: req.organization._id });
-    res.json(mrs);
+    if (mrs.length === 0) {
+      return res.status(404).json({ message: "No MRs found" });
+    }
+    res.status(200).json(mrs);
   } catch (error) {
     res
       .status(500)

@@ -135,3 +135,31 @@ export const importAreasFromExcel = async (req, res) => {
     res.status(500).json({ message: 'Failed to import areas from Excel file.' });
   }
 };
+
+export const getAreaByMrId = async (req, res) => {
+  try {
+    const { mrId } = req.params;
+
+    const mr = await Mr.findOne({
+      _id: mrId,
+      role: "mr",
+      organizationId: req.organization._id
+    }).populate('assignedAreas', 'name _id');
+
+    if (!mr) {
+      return res.status(404).json({ message: "MR not found" });
+    }
+
+    if (!mr.assignedAreas || mr.assignedAreas.length === 0) {
+      return res.status(404).json({ message: "No assigned areas found" });
+    }
+
+    res.status(200).json(mr.assignedAreas);
+
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to retrieve areas",
+      error: error.message,
+    });
+  }
+};

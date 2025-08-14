@@ -1,10 +1,10 @@
 import express from "express";
 import { auth } from "../middleware/authMiddleware.js";
-import { createDailyVisit } from "../controllers/dailyVisit.js";
+import { createDailyVisit, getDoctorsWithRemarks } from "../controllers/dailyVisit.js";
 
 const router = express.Router();
 
-router.use(auth);
-router.post("/create", createDailyVisit);
+router.post("/create", auth, createDailyVisit);
+router.get("/visitReport", getDoctorsWithRemarks);
 
 export default router;

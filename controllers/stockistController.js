@@ -1,11 +1,15 @@
-import Stockist from '../models/Stockist.js';
+import Stockist from "../models/Stockist.js";
 
 export const createStockist = async (req, res) => {
   try {
-    const { name,address,state,gstNo } = req.body;
+    const { name, address, state, gstNo } = req.body;
     const stockist = await Stockist.create({
-      name,address,state,gstNumber: gstNo, organizationId: req.organization._id
-    })
+      name,
+      address,
+      state,
+      gstNumber: gstNo,
+      organizationId: req.organization._id,
+    });
     res.status(201).json(stockist);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -13,21 +17,22 @@ export const createStockist = async (req, res) => {
 };
 
 export const getAllStockists = async (req, res) => {
-  try{
-    const organizationId = req.params.organizationId;
-  const stockists = await Stockist.find({
-    organizationId: organizationId
-  });
-  res.json(stockists);
-  }
-  catch (err) {
+  try {
+    const organizationId = req.organization._id;
+    const stockists = await Stockist.find({
+      organizationId: organizationId,
+    });
+    res.json(stockists);
+  } catch (err) {
     res.status(400).json({ error: err.message });
   }
 };
 
 export const updateStockist = async (req, res) => {
   try {
-    const stockist = await Stockist.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const stockist = await Stockist.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+    });
     res.json(stockist);
   } catch (err) {
     res.status(400).json({ error: err.message });
