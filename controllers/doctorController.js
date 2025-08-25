@@ -174,3 +174,31 @@ export const importDoctorsFromExcel = async (req, res) => {
     res.status(500).json({ message: 'Failed to import doctors from Excel file.' });
   }
 };
+
+export const getDoctorByMrId = async (req, res) => {
+  try {
+    const { mrId } = req.params;
+
+    const mr = await Mr.findOne({
+      _id: mrId,
+      role: "mr",
+      organizationId: req.organization._id
+    }).populate('assignedDoctors', 'name _id');
+
+    if (!mr) {
+      return res.status(404).json({ message: "MR not found" });
+    }
+
+    if (!mr.assignedDoctors || mr.assignedDoctors.length === 0) {
+      return res.status(404).json({ message: "No assigned doctors found" });
+    }
+
+    res.status(200).json(mr.assignedDoctors);
+
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to retrieve doctors",
+      error: error.message,
+    });
+  }
+};
