@@ -4,7 +4,8 @@ import bcrypt from "bcrypt";
 
 export const createMr = async (req, res) => {
   try {
-    const { firstName, lastName, userName, password } = req.body;
+    const { firstName, lastName, userName, password} = req.body;
+
 
     if (!firstName || !lastName || !userName || !password) {
       return res.status(400).json({ message: "All fields are required" });
@@ -14,6 +15,7 @@ export const createMr = async (req, res) => {
       firstName,
       lastName,
       userName,
+      
       password: hashed,
       organizationId: req.organization._id,
     });

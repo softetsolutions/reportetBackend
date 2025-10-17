@@ -85,12 +85,14 @@ export const assignDoctorToMR = async (req, res) => {
 
     const doctor = await Doctor.findOne({
       _id: doctorId,
+      
       organizationId: req.organization._id,
     });
 
     if (!user) return res.status(404).json({ message: "User not found" });
     
     if (!doctor) return res.status(404).json({ message: "Doctor not found" });
+    
 
     user.assignedDoctors.push(doctorId);
     await user.save();
