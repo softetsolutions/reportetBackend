@@ -18,16 +18,20 @@ export const createStockist = async (req, res) => {
 
 export const getAllStockists = async (req, res) => {
   try {
-    const organizationId = req.organization._id;
-    const stockists = await Stockist.find({
-      organizationId: organizationId,
-    });
+    const organizationId =
+      req.organization?._id || req.mr?.organizationId;
+
+    if (!organizationId) {
+      return res.status(400).json({ message: "Organization ID not found" });
+    }
+
+    const stockists = await Stockist.find({ organizationId });
     res.json(stockists);
   } catch (err) {
+    console.error("getAllStockists Error:", err.message);
     res.status(400).json({ error: err.message });
   }
 };
-
 export const updateStockist = async (req, res) => {
   try {
     const stockist = await Stockist.findByIdAndUpdate(req.params.id, req.body, {

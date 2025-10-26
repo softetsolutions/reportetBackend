@@ -1,18 +1,26 @@
 import express from "express";
 import multer from "multer";
-import { orgAuth } from "../middleware/authMiddleware.js";
-import { addArea, assignAreaToMR, getAreas, getAreaById, importAreasFromExcel,getAreaByMrId } from "../controllers/areaController.js";
+import { auth, authOrOrg, orgAuth } from "../middleware/authMiddleware.js";
+import { 
+  addArea, 
+  assignAreaToMR, 
+  getAreas, 
+  getAreaById, 
+  importAreasFromExcel, 
+  getAreaByMrId 
+} from "../controllers/areaController.js";
 
 const router = express.Router();
 const upload = multer({ dest: "uploads/" });
 
-router.use(orgAuth);
+// Organization-level routes
+router.post("/add", orgAuth, addArea);
+router.post("/assign", orgAuth, assignAreaToMR);
+router.get("/", orgAuth, getAreas);
+router.get("/:id", orgAuth, getAreaById);
+router.post("/import", orgAuth, upload.single("file"), importAreasFromExcel);
 
-router.post("/add", addArea);
-router.post("/assign", assignAreaToMR);
-router.get("/", getAreas);
-router.get("/:id", getAreaById);
-router.get("/mr/:mrId", getAreaByMrId);
-router.post("/import", upload.single("file"), importAreasFromExcel);
+// MR-level route
+router.get("/mr/:mrId", authOrOrg, getAreaByMrId);
 
 export default router;

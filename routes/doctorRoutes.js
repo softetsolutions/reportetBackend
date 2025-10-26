@@ -1,18 +1,26 @@
-import express from 'express';
-import multer from 'multer';
-import { orgAuth } from '../middleware/authMiddleware.js';
-import { addDoctor, getDoctorsByAreaId, getAllDoctors, assignDoctorToMR,importDoctorsFromExcel , getDoctorByMrId } from '../controllers/doctorController.js';
+import express from "express";
+import multer from "multer";
+import { auth, authOrOrg, orgAuth } from "../middleware/authMiddleware.js";
+import { 
+  addDoctor, 
+  getDoctorsByAreaId, 
+  getAllDoctors, 
+  assignDoctorToMR, 
+  importDoctorsFromExcel, 
+  getDoctorByMrId 
+} from "../controllers/doctorController.js";
 
-
-const upload = multer({ dest: 'uploads/' });
 const router = express.Router();
+const upload = multer({ dest: "uploads/" });
 
-router.use(orgAuth);
-router.post('/add', addDoctor);
-router.get('/getAll', getAllDoctors);
-router.get('/getByAreaId/:areaId', getDoctorsByAreaId);
-router.post('/assignToMR', assignDoctorToMR);
-router.get('/mr/:mrId', getDoctorByMrId);
-router.post('/import', upload.single('file'), importDoctorsFromExcel);
+// Organization-level routes
+router.post("/add", orgAuth, addDoctor);
+router.get("/getAll", orgAuth, getAllDoctors);
+router.get("/getByAreaId/:areaId", auth, getDoctorsByAreaId);
+router.post("/assignToMR", orgAuth, assignDoctorToMR);
+router.post("/import", orgAuth, upload.single("file"), importDoctorsFromExcel);
+
+// MR-level route
+router.get("/mr/:mrId",authOrOrg, getDoctorByMrId);
 
 export default router;

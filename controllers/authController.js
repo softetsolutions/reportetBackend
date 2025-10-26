@@ -9,15 +9,21 @@ export const login = async (req, res) => {
   try {
     const { userName, password } = req.body;
 
-    // Find user
+    // Find user|| !(await bcrypt.compare(password, user.password))
     const user = await Mr.findOne({ userName });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (!user ) {
+      console.log("User not found");
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+     const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      console.log("Password mismatch");
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
     // Create token
     const token = generateToken(user._id);
-
+ console.log("Login successful, token:", token);
     // Set token in secure HTTP-only cookie
     res.cookie("token", token, {
       httpOnly: true,
@@ -31,6 +37,7 @@ export const login = async (req, res) => {
       token: token,
     });
   } catch (error) {
+    console.error("Login error:", error);
     res.status(500).json({ message: "Server error. Please try again later." });
   }
 };
