@@ -94,8 +94,11 @@ export const assignDoctorToMR = async (req, res) => {
     if (!doctor) return res.status(404).json({ message: "Doctor not found" });
     
 
-    user.assignedDoctors.push(doctorId);
-    await user.save();
+    //if (!user.assignedDoctors.includes(doctorId)) {}
+  user.assignedDoctors.push(doctorId);
+  await user.save();
+
+
 
     res.json(user);
   } catch (error) {
@@ -180,14 +183,24 @@ export const importDoctorsFromExcel = async (req, res) => {
 export const getDoctorByMrId = async (req, res) => {
   try {
     const { mrId } = req.params;
+     const orgId = req.headers['x-org-id'];
 
+    // Fetch MR
     const mr = await Mr.findOne({
       _id: mrId,
       role: "mr",
-      organizationId: req.organization._id
+      organizationId: orgId,
+      //organizationId: req.organization?._id // if org request
     }).populate('assignedDoctors', 'name _id');
 
     if (!mr) {
+      // If MR is accessing themselves, check token
+      if (req.mr && req.mr._id.toString() === mrId) {
+        const selfMr = await Mr.findById(mrId).populate('assignedDoctors', 'name _id');
+        if (!selfMr || selfMr.assignedDoctors.length === 0)
+          return res.status(404).json({ message: "No assigned doctors found" });
+        return res.status(200).json(selfMr.assignedDoctors);
+      }
       return res.status(404).json({ message: "MR not found" });
     }
 

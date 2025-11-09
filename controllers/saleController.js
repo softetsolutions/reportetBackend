@@ -2,12 +2,26 @@ import Sale from '../models/Sale.js';
 
 export const createSale = async (req, res) => {
   try {
-    const sale = await Sale.create(req.body);
+    const mr = req.mr; // set by auth middleware
+
+    if (!mr || !mr.organizationId) {
+      return res.status(400).json({ error: "MR does not belong to any organization" });
+    }
+
+    const sale = await Sale.create({
+      date: req.body.date,
+      stockist: req.body.stockist,       // stockistId from frontend
+      month: req.body.month,
+      saleAmount: req.body.saleAmount,
+      organizationId: mr.organizationId  // automatically assigned
+    });
+
     res.status(201).json(sale);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 };
+
 
 export const getAllSales = async (req, res) => {
   const search = req.query.search || "";

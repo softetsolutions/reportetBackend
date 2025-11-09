@@ -5,12 +5,13 @@ import {
   updateSale,
   deleteSale
 } from '../controllers/saleController.js';
+import { auth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-router.post('/', createSale);
+router.post('/', auth,createSale);
 router.get('/', getAllSales);
-router.put('/:id', updateSale);
-router.delete('/:id', deleteSale);
+router.put('/:id',auth, updateSale);
+router.delete('/:id',auth, deleteSale);
 
 export default router;
