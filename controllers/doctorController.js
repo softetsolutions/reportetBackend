@@ -1,72 +1,55 @@
 import Doctor from "../models/Doctor.js";
 import Mr from "../models/Mr.js";
-import fs from 'fs';
-import ExcelJS from 'exceljs';
+import fs from "fs";
+import ExcelJS from "exceljs";
 import Area from "../models/Area.js";
-
 
 export const addDoctor = async (req, res) => {
   try {
-    const { doctors } = req.body;
+    // const sampleDoctorDataStructure = {
+    //   "Mr Satyam Tripathi": {
+    //     specialty:"",
+    //     areaId:"",
+    //     headQuarterId:""
+    //   }
+    // }
 
-    if (!Array.isArray(doctors) || doctors.length === 0) {
-      return res.status(400).json({ message: "Please provide an array of doctors." });
-    }
+    const { doctorData } = req.body;
 
-    const validDoctors = [];
-    const skippedDoctors = [];
+    const doctorArray = Object.keys(doctorData).map((doctor) => ({
+      name: doctor,
+      specialty: doctorData[doctor]?.specialty,
+      organizationId: req?.organization._id,
+      areaId: doctorData[doctor]?.areaId,
+    }));
 
-    // Fetch all valid areaIds once to minimize DB queries
-    const areaIds = doctors.map(doc => doc.areaId).filter(id => !!id);
-    const validAreaIds = new Set(
-      (
-        await Area.find({
-          _id: { $in: areaIds },
-          organizationId: req.organization._id,
-        }).select("_id")
-      ).map(area => area._id.toString())
-    );
+    const dbAcknowledge = await Doctor.insertMany(doctorArray, {
+      ordered: false,
+    });
 
-    for (const doc of doctors) {
-      const { name, specialty, areaId } = doc;
+    res.status(201).json({
+      success: true,
+      inserted: dbAcknowledge,
+      message: "Doctor are added successfuly",
+    });
+  } catch (error) {
+    if (error.code === 11000 || error.writeErrors) {
+      const insertedCount = error.result?.nInserted || 0;
 
-      if (!name || !specialty || !areaId) {
-        skippedDoctors.push({ ...doc, reason: "Missing required fields" });
-        continue;
-      }
-
-      if (!validAreaIds.has(areaId)) {
-        skippedDoctors.push({ ...doc, reason: "Invalid or unauthorized areaId" });
-        continue;
-      }
-
-      validDoctors.push({
-        name,
-        specialty,
-        areaId,
-        organizationId: req.organization._id,
+      return res.status(201).json({
+        success: true,
+        inserted: insertedCount,
+        duplicates: error.writeErrors?.length || 0,
+        message: "Some records were skipped because they already exist",
       });
     }
 
-    let insertedDoctors = [];
-    if (validDoctors.length > 0) {
-      insertedDoctors = await Doctor.insertMany(validDoctors);
-    }
-
-    res.status(201).json({
-      message: "Doctors processed successfully.",
-      inserted: insertedDoctors,
-      skipped: skippedDoctors,
-    });
-
-  } catch (error) {
     res.status(500).json({
       message: "Failed to add doctors",
       error: error.message,
     });
   }
 };
-
 
 export const assignDoctorToMR = async (req, res) => {
   try {
@@ -85,20 +68,17 @@ export const assignDoctorToMR = async (req, res) => {
 
     const doctor = await Doctor.findOne({
       _id: doctorId,
-      
+
       organizationId: req.organization._id,
     });
 
     if (!user) return res.status(404).json({ message: "User not found" });
-    
+
     if (!doctor) return res.status(404).json({ message: "Doctor not found" });
-    
 
     //if (!user.assignedDoctors.includes(doctorId)) {}
-  user.assignedDoctors.push(doctorId);
-  await user.save();
-
-
+    user.assignedDoctors.push(doctorId);
+    await user.save();
 
     res.json(user);
   } catch (error) {
@@ -115,31 +95,32 @@ export const getDoctorsByAreaId = async (req, res) => {
     const doctors = await Doctor.find({ areaId }).select("name specialty _id");
 
     if (doctors.length === 0) {
-      return res.status(404).json({ message: "No doctors found for this area" });
+      return res
+        .status(404)
+        .json({ message: "No doctors found for this area" });
     }
 
     res.status(200).json(doctors);
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to retrieve doctors by area", error: error.message });
+    res.status(500).json({
+      message: "Failed to retrieve doctors by area",
+      error: error.message,
+    });
   }
 };
 
 export const getAllDoctors = async (req, res) => {
   try {
-    const doctors = await Doctor.find({ organizationId: req.organization._id }).select("name specialty _id");
-
-    if (doctors.length === 0) {
-      return res.status(404).json({ message: "No doctors found" });
-    }
+    const doctors = await Doctor.find({
+      organizationId: req.organization._id,
+    }).select("name specialty _id");
     res.status(200).json(doctors);
   } catch (error) {
     res
       .status(500)
       .json({ message: "Failed to retrieve doctors", error: error.message });
   }
-}
+};
 
 export const importDoctorsFromExcel = async (req, res) => {
   try {
@@ -160,30 +141,45 @@ export const importDoctorsFromExcel = async (req, res) => {
       if (!name || !specialty || !areaName) continue;
 
       // Find or create area
-      let area = await Area.findOne({ name: areaName, organizationId: req.organization._id });
+      let area = await Area.findOne({
+        name: areaName,
+        organizationId: req.organization._id,
+      });
       if (!area) {
-        area = await Area.create({ name: areaName, organizationId: req.organization._id });
+        area = await Area.create({
+          name: areaName,
+          organizationId: req.organization._id,
+        });
       }
 
       // Add doctor
-      await Doctor.create({ name, specialty, areaId: area._id, organizationId: req.organization._id });
+      await Doctor.create({
+        name,
+        specialty,
+        areaId: area._id,
+        organizationId: req.organization._id,
+      });
       importedCount++;
     }
 
     // Clean up file
     fs.unlinkSync(filePath);
 
-    res.status(200).json({ message: `${importedCount} doctors imported successfully.` });
+    res
+      .status(200)
+      .json({ message: `${importedCount} doctors imported successfully.` });
   } catch (err) {
-    console.error('Excel Import Error:', err);
-    res.status(500).json({ message: 'Failed to import doctors from Excel file.' });
+    console.error("Excel Import Error:", err);
+    res
+      .status(500)
+      .json({ message: "Failed to import doctors from Excel file." });
   }
 };
 
 export const getDoctorByMrId = async (req, res) => {
   try {
     const { mrId } = req.params;
-     const orgId = req.headers['x-org-id'];
+    const orgId = req.headers["x-org-id"];
 
     // Fetch MR
     const mr = await Mr.findOne({
@@ -191,12 +187,15 @@ export const getDoctorByMrId = async (req, res) => {
       role: "mr",
       organizationId: orgId,
       //organizationId: req.organization?._id // if org request
-    }).populate('assignedDoctors', 'name _id');
+    }).populate("assignedDoctors", "name _id");
 
     if (!mr) {
       // If MR is accessing themselves, check token
       if (req.mr && req.mr._id.toString() === mrId) {
-        const selfMr = await Mr.findById(mrId).populate('assignedDoctors', 'name _id');
+        const selfMr = await Mr.findById(mrId).populate(
+          "assignedDoctors",
+          "name _id",
+        );
         if (!selfMr || selfMr.assignedDoctors.length === 0)
           return res.status(404).json({ message: "No assigned doctors found" });
         return res.status(200).json(selfMr.assignedDoctors);
@@ -209,7 +208,6 @@ export const getDoctorByMrId = async (req, res) => {
     }
 
     res.status(200).json(mr.assignedDoctors);
-
   } catch (error) {
     res.status(500).json({
       message: "Failed to retrieve doctors",

@@ -11,12 +11,14 @@ import saleRoutes from "./routes/saleRoutes.js";
 import dailyVisitRoutes from "./routes/daily-visit.js";
 import doctorRoutes from "./routes/doctorRoutes.js";
 import areaRouts from "./routes/areaRoutes.js";
+import headQuarterRoutes from "./routes/headQuarterRoutes.js";
+import employeeRoutes from "./routes/employeeRoutes.js";
 import swaggerUi from "swagger-ui-express";
 import yaml from "yamljs";
 
 dotenv.config();
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "10kb" }));
 app.use(cookieParser());
 const allowedOrigins = ["http://localhost:5173", "http://localhost:8081"];
 
@@ -30,7 +32,7 @@ app.use(
       return callback(null, true);
     },
     credentials: true,
-  })
+  }),
 );
 
 // app.use(
@@ -57,5 +59,7 @@ app.use("/api/daily-visit", dailyVisitRoutes);
 app.use("/api/doctor", doctorRoutes);
 app.use("/api/stockists", stockistRoutes);
 app.use("/api/sales", saleRoutes);
+app.use("/api/headQuarter", headQuarterRoutes);
+app.use("/api/employee", employeeRoutes);
 
 export default app;

@@ -1,12 +1,14 @@
 import mongoose from "mongoose";
+import bcrypt from "bcrypt";
 
-const userSchema = new mongoose.Schema(
+const employeeSchema = new mongoose.Schema(
   {
     firstName: String,
     lastName: String,
     userName: { type: String, unique: true }, // replace userName with employeeId
     employeeId: { type: String, unique: true },
-    email: { type: String, unique: true },
+    email: String,
+    phoneNumber: { type: Number, unique: true },
     password: String,
     displayName: {
       type: String,
@@ -18,6 +20,7 @@ const userSchema = new mongoose.Schema(
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",
+      required: true,
     },
     assignedAreas: [{ type: mongoose.Schema.Types.ObjectId, ref: "Area" }],
     assignedDoctors: [{ type: mongoose.Schema.Types.ObjectId, ref: "Doctor" }],
@@ -28,4 +31,10 @@ const userSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-export default mongoose.model("Mr", userSchema);
+employeeSchema.pre("save", async function () {
+  this.password = await bcrypt.hash(this.password, 10);
+});
+
+employeeSchema.index({ organizationId: 1, email: 1 }, { unique: true });
+
+export default mongoose.model("Employee", employeeSchema);

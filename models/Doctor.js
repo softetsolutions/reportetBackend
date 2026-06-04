@@ -9,8 +9,14 @@ const doctorSchema = new mongoose.Schema(
       ref: "Organization",
     },
     areaId: { type: mongoose.Schema.Types.ObjectId, ref: "Area" },
+    // assignedTo: {
+    //   type: mongoose.Schema.Types.ObjectId,
+    //   ref: "User",
+    // },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
+
+doctorSchema.index({ organizationId: 1, areaId: 1, name: 1 }, { unique: true });
 
 export default mongoose.model("Doctor", doctorSchema);

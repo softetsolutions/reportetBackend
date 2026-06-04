@@ -696,7 +696,6 @@ paths:
 
 
 #stockist routes
-  paths:
   /api/stockist:
     post:
       tags:
@@ -810,3 +809,7 @@ paths:
           description: Deleted successfully
         '400':
           description: Deletion error
+
+#headQuarter routes
+paths:
+

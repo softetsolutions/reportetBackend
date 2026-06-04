@@ -4,17 +4,19 @@ import Organization from "../models/Organization.js";
 
 // MR Auth Middleware
 export const auth = async (req, res, next) => {
-  // console.log("🔹 Cookies received in auth:", req.cookies); 
+  // console.log("🔹 Cookies received in auth:", req.cookies);
   try {
     const token =
       req.cookies.token || req.headers["authorization"]?.split(" ")[1];
-//console.log("🔹 Received token:", token)
-    if (!token) return res.status(401).json({ message: "Unauthorized - No token" });
+    //console.log("🔹 Received token:", token)
+    if (!token)
+      return res.status(401).json({ message: "Unauthorized - No token" });
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     //console.log("Decoded token:", decoded);
     const mr = await Mr.findById(decoded.id);
-    if (!mr) return res.status(401).json({ message: "Unauthorized - Invalid MR" });
+    if (!mr)
+      return res.status(401).json({ message: "Unauthorized - Invalid MR" });
 
     req.mr = mr;
     console.log("🔹 MR in auth middleware:", mr);
@@ -28,7 +30,6 @@ export const auth = async (req, res, next) => {
 
 // Organization Auth
 export const orgAuth = async (req, res, next) => {
-   console.log("🔹 Cookies received in auth:", req.cookies); 
   try {
     const token =
       req.cookies.orgToken || req.headers["authorization"]?.split(" ")[1];
@@ -43,6 +44,7 @@ export const orgAuth = async (req, res, next) => {
       return res.status(401).json({ message: "Unauthorized - Invalid org" });
 
     req.organization = org;
+    console.log("Organisation id is", req.organization.id);
     next();
   } catch (error) {
     console.error("Org Auth Error:", error.message);
@@ -50,7 +52,6 @@ export const orgAuth = async (req, res, next) => {
   }
 };
 // middleware/authMiddleware.js
-
 
 export const authOrOrg = async (req, res, next) => {
   try {
@@ -68,7 +69,9 @@ export const authOrOrg = async (req, res, next) => {
     }
 
     if (!token) {
-      return res.status(401).json({ message: "Unauthorized - No token provided" });
+      return res
+        .status(401)
+        .json({ message: "Unauthorized - No token provided" });
     }
 
     // 3️⃣ Verify and find either MR or Organization
@@ -96,51 +99,6 @@ export const authOrOrg = async (req, res, next) => {
     return res.status(401).json({ message: "Unauthorized - Invalid token" });
   }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // import jwt from 'jsonwebtoken';
 // import Mr from '../models/Mr.js';
@@ -202,9 +160,6 @@ export const authOrOrg = async (req, res, next) => {
 //   }
 // };
 
-
-
-
 // import jwt from 'jsonwebtoken';
 // import Mr from '../models/Mr.js';
 // import Organization from '../models/Organization.js';
@@ -234,8 +189,6 @@ export const authOrOrg = async (req, res, next) => {
 //     return res.status(401).json({ message: 'Unauthorized' });
 //   }
 // };
-
-
 
 // export const checkRole = (role) => (req, res, next) => {
 //   if (req.user.role !== role ) {
