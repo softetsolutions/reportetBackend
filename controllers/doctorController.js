@@ -111,14 +111,40 @@ export const getDoctorsByAreaId = async (req, res) => {
 
 export const getAllDoctors = async (req, res) => {
   try {
-    const doctors = await Doctor.find({
-      organizationId: req.organization._id,
-    }).select("name specialty _id");
-    res.status(200).json(doctors);
+    const pageNo = Number(req.body.pageNo) || 1;
+    const limit = Number(req.body.limit) || 5;
+
+    const filter = {
+      organizationId: req?.organization?.id,
+    };
+
+    const [doctors, totalDoctorCount] = await Promise.all([
+      Doctor.find(
+        filter,
+        {
+          _id: 1,
+          name: 1,
+          specialty: 1,
+        },
+        {
+          skip: (pageNo - 1) * limit,
+          limit,
+        },
+      ),
+      Doctor.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      doctors,
+      doctorsCount: totalDoctorCount,
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to retrieve doctors", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve doctors",
+      error: error.message,
+    });
   }
 };
 

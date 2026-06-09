@@ -1,4 +1,4 @@
-import Mr from "../models/Mr.js";
+import Employee from "../models/Employee.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 
@@ -9,7 +9,7 @@ export const login = async (req, res) => {
   try {
     const { userName, password } = req.body;
 
-    const user = await Mr.findOne({ userName });
+    const user = await Employee.findOne({ employeeId: userName });
     if (!user) {
       return res.status(401).json({ message: "Invalid credentials" });
     }

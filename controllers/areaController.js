@@ -49,17 +49,40 @@ export const addArea = async (req, res) => {
 
 export const getAreas = async (req, res) => {
   try {
-    const areas = await Area.find({
-      organizationId: req.organization._id,
-    }).select("name _id");
-    if (areas.length === 0) {
-      return res.status(404).json({ message: "No areas found" });
-    }
-    res.json(areas);
+    const pageNo = Number(req.body.pageNo) || 1;
+    const limit = Number(req.body.limit) || 5;
+
+    const filter = {
+      organizationId: req?.organization?.id,
+    };
+
+    const [areas, totalAreaCount] = await Promise.all([
+      Area.find(
+        filter,
+        {
+          _id: 1,
+          name: 1,
+          headQuarterId: 1,
+        },
+        {
+          skip: (pageNo - 1) * limit,
+          limit,
+        },
+      ).populate("headQuarterId", "_id headQuarterName"),
+      Area.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      areas,
+      areasCount: totalAreaCount,
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to retrieve areas", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve areas",
+      error: error.message,
+    });
   }
 };
 

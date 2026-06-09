@@ -15,7 +15,7 @@ const upload = multer({ dest: "uploads/" });
 
 // Organization-level routes
 router.post("/add", orgAuth, addArea);
-router.get("/", orgAuth, getAreas);
+router.post("/", orgAuth, getAreas);
 router.get("/:id", orgAuth, getAreaById);
 router.post("/import", orgAuth, upload.single("file"), importAreasFromExcel);
 router.get("/headquarter/:id", orgAuth, getAreasByHeadQuarterId);

@@ -1,8 +1,8 @@
 import jwt from "jsonwebtoken";
-import Mr from "../models/Mr.js";
+import Employee from "../models/Employee.js";
 import Organization from "../models/Organization.js";
 
-// MR Auth Middleware
+//Employee Auth Middleware
 export const auth = async (req, res, next) => {
   // console.log("🔹 Cookies received in auth:", req.cookies);
   try {
@@ -14,12 +14,18 @@ export const auth = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     //console.log("Decoded token:", decoded);
-    const mr = await Mr.findById(decoded.id);
-    if (!mr)
-      return res.status(401).json({ message: "Unauthorized - Invalid MR" });
+    const employee = await Employee.findById(decoded.id);
+    if (!employee)
+      return res
+        .status(401)
+        .json({ message: "Unauthorized - Invalid Employee" });
 
-    req.mr = mr;
-    console.log("🔹 MR in auth middleware:", mr);
+    req.employee = employee;
+    req.organization = {
+      id: employee?.organizationId,
+      _id: employee?.organizationId,
+    };
+    console.log("🔹 Employee in auth middleware:", employee);
 
     next();
   } catch (error) {
@@ -74,14 +80,18 @@ export const authOrOrg = async (req, res, next) => {
         .json({ message: "Unauthorized - No token provided" });
     }
 
-    // 3️⃣ Verify and find either MR or Organization
+    // 3️⃣ Verify and find either Employee or Organization
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Try to find MR
-    const mr = await Mr.findById(decoded.id);
-    if (mr) {
-      req.mr = mr;
-      console.log("🔹 MR in auth middleware:", mr);
+    // Try to find Employee
+    const employee = await Employee.findById(decoded.id);
+    if (employee) {
+      req.employee = employee;
+      req.organization = {
+        id: employee?.organizationId,
+        _id: employee?.organizationId,
+      };
+      console.log("🔹 Employee in auth middleware:", employee);
 
       return next();
     }
@@ -99,106 +109,3 @@ export const authOrOrg = async (req, res, next) => {
     return res.status(401).json({ message: "Unauthorized - Invalid token" });
   }
 };
-
-// import jwt from 'jsonwebtoken';
-// import Mr from '../models/Mr.js';
-// import Organization from '../models/Organization.js';
-
-// // MR Auth Middleware
-// export const auth = async (req, res, next) => {
-//   try {
-//     let token;
-
-//     // 1️⃣ Check Authorization header first
-//     const authHeader = req.headers.authorization;
-//     if (authHeader && authHeader.startsWith('Bearer ')) {
-//       token = authHeader.split(' ')[1];
-//     }
-
-//     // 2️⃣ Fallback to cookie
-//     if (!token && req.cookies.token) {
-//       token = req.cookies.token;
-//     }
-
-//     if (!token) return res.status(401).json({ message: 'Unauthorized' });
-
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//     req.mr = await Mr.findById(decoded.id);
-
-//     next();
-//   } catch (error) {
-//     console.error('Auth Middleware Error:', error.message);
-//     return res.status(401).json({ message: 'Unauthorized' });
-//   }
-// };
-
-// // Organization Auth Middleware
-// export const orgAuth = async (req, res, next) => {
-//   try {
-//     let token;
-
-//     // Check Authorization header first
-//     const authHeader = req.headers.authorization;
-//     if (authHeader && authHeader.startsWith('Bearer ')) {
-//       token = authHeader.split(' ')[1];
-//     }
-
-//     // Fallback to cookie
-//     if (!token && req.cookies.orgToken) {
-//       token = req.cookies.orgToken;
-//     }
-
-//     if (!token) return res.status(401).json({ message: 'Unauthorized' });
-
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//     req.organization = await Organization.findById(decoded.id);
-
-//     next();
-//   } catch (error) {
-//     console.error('Org Auth Middleware Error:', error.message);
-//     return res.status(401).json({ message: 'Unauthorized' });
-//   }
-// };
-
-// import jwt from 'jsonwebtoken';
-// import Mr from '../models/Mr.js';
-// import Organization from '../models/Organization.js';
-
-// export const auth = async (req, res, next) => {
-//   try {
-//     const token = req.cookies.token;
-//     if (!token) return res.status(401).json({ message: 'Unauthorized' });
-
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//     req.mr = await Mr.findById(decoded.id);
-//     next();
-//   } catch {
-//     return res.status(401).json({ message: 'Unauthorized' });
-//   }
-// };
-
-// export const orgAuth = async (req, res, next) => {
-//   try {
-//     const token = req.cookies.orgToken;
-//     if (!token) return res.status(401).json({ message: 'Unauthorized' });
-
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//     req.organization = await Organization.findById(decoded.id);
-//     next();
-//   } catch {
-//     return res.status(401).json({ message: 'Unauthorized' });
-//   }
-// };
-
-// export const checkRole = (role) => (req, res, next) => {
-//   if (req.user.role !== role ) {
-//     return res.status(403).json({ message: 'Forbidden' });
-//    }
-//    next();
-//  };
-
-//  export const orgcheckRole = (role) => (req, res, next) => {
-//  if (req.organization.role !== role ) {
-//    return res.status(403).json({ message: 'Forbidden' });
-//  }   next();
-//  };

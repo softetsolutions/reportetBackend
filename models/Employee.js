@@ -5,10 +5,9 @@ const employeeSchema = new mongoose.Schema(
   {
     firstName: String,
     lastName: String,
-    userName: { type: String, unique: true }, // replace userName with employeeId
-    employeeId: { type: String, unique: true },
+    employeeId: { type: String, required: true },
     email: String,
-    phoneNumber: { type: Number, unique: true },
+    phoneNumber: Number,
     password: String,
     displayName: {
       type: String,
@@ -36,5 +35,7 @@ employeeSchema.pre("save", async function () {
 });
 
 employeeSchema.index({ organizationId: 1, email: 1 }, { unique: true });
+employeeSchema.index({ organizationId: 1, phoneNumber: 1 }, { unique: true });
+employeeSchema.index({ organizationId: 1, employeeId }, { unique: true });
 
 export default mongoose.model("Employee", employeeSchema);
