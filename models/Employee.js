@@ -6,6 +6,7 @@ const employeeSchema = new mongoose.Schema(
     firstName: String,
     lastName: String,
     employeeId: { type: String, required: true },
+   
     email: String,
     phoneNumber: Number,
     password: String,
@@ -26,6 +27,8 @@ const employeeSchema = new mongoose.Schema(
     assignedHeadQuarters: [
       { type: mongoose.Schema.Types.ObjectId, ref: "Headquarter" },
     ],
+    isActive: { type: Boolean, default: true },
+    deactivatedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
@@ -36,6 +39,7 @@ employeeSchema.pre("save", async function () {
 
 employeeSchema.index({ organizationId: 1, email: 1 }, { unique: true });
 employeeSchema.index({ organizationId: 1, phoneNumber: 1 }, { unique: true });
-employeeSchema.index({ organizationId: 1, employeeId }, { unique: true });
+employeeSchema.index({ organizationId: 1, employeeId:1 }, { unique: true });
+
 
 export default mongoose.model("Employee", employeeSchema);
