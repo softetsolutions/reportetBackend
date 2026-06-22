@@ -3,13 +3,14 @@ import bcrypt from "bcrypt";
 
 const employeeSchema = new mongoose.Schema(
   {
-    firstName: String,
-    lastName: String,
+    firstName: { type: String, required: true },
+    lastName: { type: String, required: true },
+    userName: { type: String, required: true, unique: true },
     employeeId: { type: String, required: true },
-   
-    email: String,
-    phoneNumber: Number,
-    password: String,
+
+    email: { type: String, required: true },
+    phoneNumber: { type: Number, required: true },
+    password: { type: String, required: true },
     displayName: {
       type: String,
       default: function () {
@@ -39,7 +40,6 @@ employeeSchema.pre("save", async function () {
 
 employeeSchema.index({ organizationId: 1, email: 1 }, { unique: true });
 employeeSchema.index({ organizationId: 1, phoneNumber: 1 }, { unique: true });
-employeeSchema.index({ organizationId: 1, employeeId:1 }, { unique: true });
-
+employeeSchema.index({ organizationId: 1, employeeId: 1 }, { unique: true });
 
 export default mongoose.model("Employee", employeeSchema);

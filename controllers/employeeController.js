@@ -18,25 +18,42 @@ export const onboardEmployee = async (req, res) => {
       assignedHeadQuarters,
     } = req.body;
 
-    if (!role) {
+    if (
+      !firstName ||
+      !lastName ||
+      !employeeId ||
+      !password ||
+      !email ||
+      !phoneNumber
+    ) {
       res.status(422).json({
+        success: false,
+        message:
+          "One of the required field is missing. Pls fill all required field and try again later.",
+      });
+    }
+
+    if (!role) {
+      return res.status(422).json({
         success: false,
         message: "Role is required while onboarding the employee",
       });
     } else if (role === "mr" && assignedHeadQuarters.length > 1) {
-      res.status(422).json({
+      return res.status(422).json({
         success: false,
         message: "If role is mr then only an headquarter can be assigned",
       });
     }
-    
-
-
+    const userName =
+      req?.organization?.code && employeeId
+        ? `${req?.organization?.code}_${employeeId}`
+        : undefined;
     const data = await Employee.create({
       firstName: firstName,
       lastName: lastName,
+      userName: userName,
       employeeId: employeeId,
-    
+
       email: email,
       phoneNumber: phoneNumber,
       password: password,
@@ -47,8 +64,7 @@ export const onboardEmployee = async (req, res) => {
 
     sendMail(
       "Welcome to the team pls find the credential to log in mobile application",
-      employeeId,
-      
+      userName,
       password,
       [{ email: email, name: (firstName || "") + (lastName || "") }],
     ).catch((error) => console.error(error));
@@ -102,6 +118,33 @@ export const paginatedEmployeeList = async (req, res) => {
   }
 };
 
+export const getAllEmployeeOptions = async (req, res) => {
+  try {
+    const organizationId = req?.organization?.id;
+
+    const employeeOptions = await Employee.find(
+      {
+        organizationId: organizationId,
+      },
+      {
+        _id: 1,
+        firstName: 1,
+        lastName: 1,
+      },
+    );
+
+    res.status(200).json({
+      success: true,
+      data: employeeOptions,
+    });
+  } catch (error) {
+    console.error("Got error in geting employee options", error);
+    res.status(500).json({
+      success: false,
+      message: "Problem in fetching all employees option. Pls try again later",
+    });
+  }
+};
 
 export const getEmployeeById = async (req, res) => {
   try {
@@ -125,14 +168,14 @@ export const getEmployeeById = async (req, res) => {
 
     const assignedAreas = await Area.find(
       { headQuarterId: { $in: hqIds }, organizationId: req?.organization?.id },
-      { name: 1, _id: 1 }
+      { name: 1, _id: 1 },
     );
 
     const areaIds = assignedAreas.map((a) => a._id);
 
     const assignedDoctors = await Doctor.find(
       { areaId: { $in: areaIds }, organizationId: req?.organization?.id },
-      { name: 1, specialty: 1, _id: 1 }
+      { name: 1, specialty: 1, _id: 1 },
     );
 
     res.status(200).json({
@@ -175,13 +218,11 @@ export const updateEmployee = async (req, res) => {
       }
     }
 
-    
     if (req.body.isActive !== undefined) {
       updates.isActive = req.body.isActive;
       updates.deactivatedAt = req.body.isActive ? null : new Date();
     }
 
-  
     if (updates.firstName || updates.lastName) {
       const existing = await Employee.findOne({
         employeeId,
@@ -190,10 +231,8 @@ export const updateEmployee = async (req, res) => {
       updates.displayName = `${updates.firstName || existing.firstName} ${updates.lastName || existing.lastName}`;
     }
 
-    
     const { addHeadQuarters, removeHeadQuarters } = req.body;
 
-  
     if (addHeadQuarters?.length) {
       const existing = await Employee.findOne({
         employeeId,
@@ -210,7 +249,10 @@ export const updateEmployee = async (req, res) => {
       if (existing.role === "mr") {
         const currentCount = existing.assignedHeadQuarters.length;
         const newUniqueCount = addHeadQuarters.filter(
-          (hq) => !existing.assignedHeadQuarters.map((h) => h.toString()).includes(hq)
+          (hq) =>
+            !existing.assignedHeadQuarters
+              .map((h) => h.toString())
+              .includes(hq),
         ).length;
 
         if (currentCount + newUniqueCount > 1) {
@@ -222,36 +264,30 @@ export const updateEmployee = async (req, res) => {
       }
     }
 
-
     const mongoUpdate = {};
 
-    
     if (Object.keys(updates).length) {
       mongoUpdate.$set = updates;
     }
 
-    
     if (addHeadQuarters?.length) {
       mongoUpdate.$addToSet = {
         assignedHeadQuarters: { $each: addHeadQuarters },
       };
     }
 
-   
     if (removeHeadQuarters?.length) {
       mongoUpdate.$pull = {
         assignedHeadQuarters: { $in: removeHeadQuarters },
       };
     }
 
-    
     if (
       mongoUpdate.$set?.assignedHeadQuarters &&
       (mongoUpdate.$addToSet || mongoUpdate.$pull)
     ) {
       delete mongoUpdate.$set.assignedHeadQuarters;
     }
-    
 
     const employee = await Employee.findOneAndUpdate(
       {
@@ -259,7 +295,7 @@ export const updateEmployee = async (req, res) => {
         organizationId: req?.organization?.id,
       },
       mongoUpdate,
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     )
       .populate("assignedHeadQuarters", "headQuarterName _id")
       .select("-password -__v -updatedAt");
@@ -275,10 +311,10 @@ export const updateEmployee = async (req, res) => {
       req.body.isActive !== undefined
         ? `Employee ${employee.isActive ? "activated" : "deactivated"} successfully`
         : addHeadQuarters?.length
-        ? "Headquarter(s) assigned successfully"
-        : removeHeadQuarters?.length
-        ? "Headquarter(s) unassigned successfully"
-        : "Employee updated successfully";
+          ? "Headquarter(s) assigned successfully"
+          : removeHeadQuarters?.length
+            ? "Headquarter(s) unassigned successfully"
+            : "Employee updated successfully";
 
     res.status(200).json({
       success: true,
@@ -290,6 +326,49 @@ export const updateEmployee = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Unable to update employee",
+    });
+  }
+};
+
+export const getAssignedDoctorAndArea = async (req, res) => {
+  try {
+    // here we are expecting the employee details in the req object so pls ensure to use auth middleware
+
+    const areas = await Area.find(
+      {
+        headQuarterId: { $in: req?.employee?.assignedHeadQuarters },
+      },
+      {
+        _id: 1,
+        name: 1,
+      },
+    );
+
+    const areaId = areas.map((area) => area._id);
+
+    const doctors = await Doctor.find(
+      {
+        areaId: { $in: areaId },
+      },
+      {
+        _id: 1,
+        name: 1,
+        specialty: 1,
+        areaId: 1,
+      },
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        assignedAreas: areas,
+        assignedDoctors: doctors,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Can not get assigned doctor and area details",
     });
   }
 };

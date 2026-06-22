@@ -8,23 +8,26 @@ export const auth = async (req, res, next) => {
   try {
     const token =
       req.cookies.token || req.headers["authorization"]?.split(" ")[1];
-    //console.log("🔹 Received token:", token)
+    console.log("🔹 Received token inside auth middleware:", token);
     if (!token)
       return res.status(401).json({ message: "Unauthorized - No token" });
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    //console.log("Decoded token:", decoded);
-    const employee = await Employee.findById(decoded.id);
+
+    const employee = await Employee.findById(decoded.id, {
+      password: 0,
+      assignedAreas: 0,
+      assignedDoctors: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      __v: 0,
+    });
     if (!employee)
       return res
         .status(401)
         .json({ message: "Unauthorized - Invalid Employee" });
 
     req.employee = employee;
-    req.organization = {
-      id: employee?.organizationId,
-      _id: employee?.organizationId,
-    };
     console.log("🔹 Employee in auth middleware:", employee);
 
     next();
@@ -84,13 +87,16 @@ export const authOrOrg = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // Try to find Employee
-    const employee = await Employee.findById(decoded.id);
+    const employee = await Employee.findById(decoded.id, {
+      password: 0,
+      assignedAreas: 0,
+      assignedDoctors: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      __v: 0,
+    });
     if (employee) {
       req.employee = employee;
-      req.organization = {
-        id: employee?.organizationId,
-        _id: employee?.organizationId,
-      };
       console.log("🔹 Employee in auth middleware:", employee);
 
       return next();

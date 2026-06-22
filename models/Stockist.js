@@ -5,14 +5,18 @@ const stockistSchema = new mongoose.Schema(
     name: { type: String, required: true },
     address: String,
     state: String,
-    gstNumber: String,
+    headQuarter: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Headquarter",
+      required: true,
+    },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",
       required: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export default mongoose.model("Stockist", stockistSchema);

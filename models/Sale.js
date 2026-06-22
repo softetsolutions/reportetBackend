@@ -2,7 +2,11 @@ import mongoose from "mongoose";
 
 const saleSchema = new mongoose.Schema(
   {
-    date: { type: Date, required: true },
+    saleBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      required: true,
+    },
     stockist: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Stockist",
@@ -11,18 +15,18 @@ const saleSchema = new mongoose.Schema(
     month: {
       type: String,
       enum: [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
       ],
       required: true,
     },
@@ -35,5 +39,7 @@ const saleSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+saleSchema.index({ organizationId: 1, saleBy: 1, month: 1 }, { unique: true });
 
 export default mongoose.model("Sale", saleSchema);
