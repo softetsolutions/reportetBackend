@@ -4,11 +4,9 @@ import Organization from "../models/Organization.js";
 
 //Employee Auth Middleware
 export const auth = async (req, res, next) => {
-  // console.log("🔹 Cookies received in auth:", req.cookies);
   try {
     const token =
       req.cookies.token || req.headers["authorization"]?.split(" ")[1];
-    console.log("🔹 Received token inside auth middleware:", token);
     if (!token)
       return res.status(401).json({ message: "Unauthorized - No token" });
 
@@ -28,7 +26,6 @@ export const auth = async (req, res, next) => {
         .json({ message: "Unauthorized - Invalid Employee" });
 
     req.employee = employee;
-    console.log("🔹 Employee in auth middleware:", employee);
 
     next();
   } catch (error) {
@@ -47,13 +44,11 @@ export const orgAuth = async (req, res, next) => {
       return res.status(401).json({ message: "Unauthorized - No token" });
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    //console.log("Decoded  org auth token:", decoded);
     const org = await Organization.findById(decoded.id);
     if (!org)
       return res.status(401).json({ message: "Unauthorized - Invalid org" });
 
     req.organization = org;
-    console.log("Organisation id is", req.organization.id);
     next();
   } catch (error) {
     console.error("Org Auth Error:", error.message);
@@ -97,7 +92,6 @@ export const authOrOrg = async (req, res, next) => {
     });
     if (employee) {
       req.employee = employee;
-      console.log("🔹 Employee in auth middleware:", employee);
 
       return next();
     }

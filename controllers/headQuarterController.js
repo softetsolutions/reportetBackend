@@ -8,7 +8,6 @@ export const addHeadquarter = async (req, res) => {
   const session = await mongoose.startSession();
   try {
     const { hierrarchy } = req.body;
-    console.log("hierrarchy is", hierrarchy);
     if (!hierrarchy?.headquarters?.length) {
       res.json({
         success: false,

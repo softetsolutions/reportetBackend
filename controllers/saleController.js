@@ -22,7 +22,7 @@ export const createSale = async (req, res) => {
       data: sale,
     });
   } catch (err) {
-    console.log("Error in creating sale", err);
+    console.error("Error in creating sale", err);
     if (err?.code === 11000) {
       return res.status(500).json({
         success: false,

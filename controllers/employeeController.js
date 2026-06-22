@@ -68,7 +68,6 @@ export const onboardEmployee = async (req, res) => {
       password,
       [{ email: email, name: (firstName || "") + (lastName || "") }],
     ).catch((error) => console.error(error));
-    console.log("New Employee created", data, "with password", password);
 
     res.status(200).json({
       success: true,

@@ -37,7 +37,6 @@ export const getStockistOptions = async (req, res) => {
       },
     );
 
-    console.log("stockistOptions are", stockistOptions);
     res.json({
       success: true,
       data: stockistOptions,

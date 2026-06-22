@@ -23,8 +23,6 @@ export const createDailyVisit = async (req, res) => {
       organizationId,
     });
 
-    console.log("dailyVisit is", dailyVisit);
-
     const submitedVisitDetails = await DailyVisit.findById(dailyVisit?.id, {
       updatedAt: 0,
       __v: 0,
