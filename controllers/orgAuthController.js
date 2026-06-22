@@ -51,8 +51,9 @@ export const orgLogin = async (req, res) => {
     const token = generateOrgToken(org._id);
     res.cookie("orgToken", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
+      secure: true,
+      sameSite: "none",
+      path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
