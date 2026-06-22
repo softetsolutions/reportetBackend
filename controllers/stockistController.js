@@ -2,36 +2,84 @@ import Stockist from "../models/Stockist.js";
 
 export const createStockist = async (req, res) => {
   try {
-    const { name, address, state, gstNo } = req.body;
+    const { name, address, state, headQuarter } = req.body;
     const stockist = await Stockist.create({
       name,
       address,
       state,
-      gstNumber: gstNo,
+      headQuarter,
       organizationId: req.organization._id,
     });
-    res.status(201).json(stockist);
+    res.status(201).json({
+      success: true,
+      added: stockist,
+    });
   } catch (err) {
+    console.error("Got error in creating stockist", err);
     res.status(400).json({ error: err.message });
+  }
+};
+
+export const getStockistOptions = async (req, res) => {
+  try {
+    const organizationId =
+      req?.employee?.organizationId ?? req.organization?.id;
+
+    if (!organizationId) {
+      throw new Error("Organization id is not defined");
+    }
+
+    const stockistOptions = await Stockist.find(
+      { organizationId: organizationId },
+      {
+        _id: 1,
+        name: 1,
+      },
+    );
+
+    res.json({
+      success: true,
+      data: stockistOptions,
+    });
+  } catch (error) {
+    console.error("Unable to get stockist options", error);
+    res.json({
+      success: false,
+      message: "Unable to get stockist options",
+    });
   }
 };
 
 export const getAllStockists = async (req, res) => {
   try {
-    const organizationId = req.organization?._id || req.mr?.organizationId;
+    const pageNo = Number(req?.body?.pageNo) || 1;
+    const limit = Number(req?.body?.limit) || 10;
+    const organizationId =
+      req.organization?._id || req.employee?.organizationId;
 
     if (!organizationId) {
       return res.status(400).json({ message: "Organization ID not found" });
     }
 
-    const stockists = await Stockist.find(
-      { organizationId },
-      { _id: 1, name: 1, address: 1, state: 1 },
-    );
+    const filter = {
+      organizationId: organizationId,
+    };
+
+    const [stockist, stockistCount] = await Promise.all([
+      Stockist.find(filter, {
+        _id: 1,
+        name: 1,
+        address: 1,
+        state: 1,
+        headQuarter: 1,
+      }).populate("headQuarter", "headQuarterName _id"),
+      Stockist.countDocuments(filter),
+    ]);
 
     res.status(201).json({
       success: true,
-      data: stockists,
+      data: stockist,
+      stockistCount,
     });
   } catch (err) {
     console.error("getAllStockists Error:", err.message);

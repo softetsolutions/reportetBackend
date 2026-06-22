@@ -14,7 +14,7 @@ const brevo = new BrevoClient({
 // sender: { name: 'Alex from Brevo', email: 'hello@brevo.com' },
 // to: [{ email: 'johndoe@example.com', name: 'John Doe' }],
 
-export default async function sendMail(subject, employeeId, password, to) {
+export default async function sendMail(subject, userName, password, to) {
   try {
     await brevo.transactionalEmails.sendTransacEmail({
       subject: subject,
@@ -58,7 +58,7 @@ export default async function sendMail(subject, employeeId, password, to) {
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:6px; padding:20px;">
                 <tr>
                   <td style="padding:10px 0; font-size:15px;">
-                    <strong>Employee ID:</strong> ${employeeId}
+                    <strong>Username:</strong> ${userName}
                   </td>
                 </tr>
 

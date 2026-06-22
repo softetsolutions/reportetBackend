@@ -13,6 +13,7 @@ import doctorRoutes from "./routes/doctorRoutes.js";
 import areaRouts from "./routes/areaRoutes.js";
 import headQuarterRoutes from "./routes/headQuarterRoutes.js";
 import employeeRoutes from "./routes/employeeRoutes.js";
+import leaveRoutes from "./routes/leaveRoutes.js";
 import swaggerUi from "swagger-ui-express";
 import yaml from "yamljs";
 
@@ -61,5 +62,6 @@ app.use("/api/stockists", stockistRoutes);
 app.use("/api/sales", saleRoutes);
 app.use("/api/headQuarter", headQuarterRoutes);
 app.use("/api/employee", employeeRoutes);
+app.use("/api/leaves", leaveRoutes);
 
 export default app;

@@ -1,4 +1,5 @@
 import Area from "../models/Area.js";
+import Employee from "../models/Employee.js";
 import Mr from "../models/Mr.js";
 import fs from "fs";
 import ExcelJS from "exceljs";
@@ -205,6 +206,69 @@ export const getAreasByHeadQuarterId = async (req, res) => {
     res.status(500).json({
       message: "Failed to retrive area by headQuarter id",
       error: error.message,
+    });
+  }
+};
+
+export const getEmployeeAssignedAreas = async (req, res) => {
+  try {
+    if (req?.employee) {
+      if (!req?.employee?.assignedHeadQuarters?.length) {
+        res.status(200).json({
+          success: true,
+          assignedAreas: [],
+        });
+      }
+
+      const assignedAreas = await Area.find(
+        {
+          _id: { $in: req?.employee?.assignedHeadQuarters },
+        },
+        {
+          _id: 1,
+          name: 1,
+        },
+      );
+
+      res.status(200).json({
+        success: true,
+        assignedAreas: assignedAreas,
+      });
+    } else {
+      const { employeeId } = req?.body;
+
+      const employeeDetail = await Employee.find(
+        {
+          id: employeeId,
+        },
+        {
+          _id: 0,
+          firstName: 0,
+          lastName: 0,
+          userName: 0,
+          employeeId: 0,
+          email: 0,
+          phoneNumber: 0,
+          password: 0,
+          role: 0,
+          organizationId: 0,
+          assignedDoctors: 0,
+          assignedHeadQuarters: 0,
+          createdAt: 0,
+          updatedAt: 0,
+          __v: 0,
+        },
+      ).populate("assignedDoctors", "_id name");
+
+      res?.status(200).json({
+        success: true,
+        assignedAreas: employeeDetail?.assignedDoctors,
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Unable to get the employee assigned area.",
     });
   }
 };
