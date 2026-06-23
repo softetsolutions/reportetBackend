@@ -202,7 +202,7 @@ export const getDailyVisitInfo = async (req, res) => {
     const endOfDay = dayjs().tz("Asia/Kolkata").endOf("day").utc().toDate();
 
     const alreadySubmitted = await DailyVisit.find({
-      id: employeeId,
+      employeeId,
       createdAt: {
         $gte: startOfDay,
         $lte: endOfDay,
