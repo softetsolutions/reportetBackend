@@ -62,6 +62,8 @@ export const authOrOrg = async (req, res, next) => {
     let token = null;
 
     // 1️⃣ Try Bearer header first (used by mobile)
+    
+    
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith("Bearer ")) {
       token = authHeader.split(" ")[1];
@@ -69,8 +71,9 @@ export const authOrOrg = async (req, res, next) => {
 
     // 2️⃣ Fallback to cookies (used by web)
     if (!token && (req.cookies.token || req.cookies.orgToken)) {
-      token = req.cookies.token || req.cookies.orgToken;
+       token = req.cookies.orgToken || req.cookies.token;
     }
+
 
     if (!token) {
       return res

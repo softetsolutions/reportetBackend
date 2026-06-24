@@ -56,6 +56,7 @@ export const getAllStockists = async (req, res) => {
     const limit = Number(req?.body?.limit) || 10;
     const organizationId =
       req.organization?._id || req.employee?.organizationId;
+      console.log("Verification", organizationId)
 
     if (!organizationId) {
       return res.status(400).json({ message: "Organization ID not found" });
@@ -72,7 +73,8 @@ export const getAllStockists = async (req, res) => {
         address: 1,
         state: 1,
         headQuarter: 1,
-      }).populate("headQuarter", "headQuarterName _id"),
+      }).populate("headQuarter", "headQuarterName _id").skip((pageNo - 1) * limit).limit(limit),
+      
       Stockist.countDocuments(filter),
     ]);
 
