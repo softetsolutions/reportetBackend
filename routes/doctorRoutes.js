@@ -8,6 +8,7 @@ import {
   assignDoctorToMR,
   importDoctorsFromExcel,
   getDoctorByMrId,
+  editDoctor
 } from "../controllers/doctorController.js";
 
 const router = express.Router();
@@ -22,5 +23,5 @@ router.post("/import", orgAuth, upload.single("file"), importDoctorsFromExcel);
 
 // MR-level route
 router.get("/mr/:mrId", authOrOrg, getDoctorByMrId);
-
+router.put("/:doctorId", orgAuth, editDoctor);
 export default router;

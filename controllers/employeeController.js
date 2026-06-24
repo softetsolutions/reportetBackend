@@ -85,7 +85,40 @@ export const onboardEmployee = async (req, res) => {
 export const paginatedEmployeeList = async (req, res) => {
   try {
     let { pageNo = 1, limit = 5 } = req.body;
+    const { name, fromDate, toDate } = req.body;
     const filter = { organizationId: req?.organization?.id };
+    
+
+   if (name?.trim()) {
+  const parts = name.trim().split(/\s+/);
+   if (parts.length === 1) {
+    
+    filter.$or = [
+      { firstName: { $regex: parts[0], $options: "i" } },
+      { lastName: { $regex: parts[0], $options: "i" } },
+    ];
+  } else {
+    
+    const first = parts[0];
+    const last = parts.slice(1).join(" ");
+    filter.$and = [
+      { firstName: { $regex: first, $options: "i" } },
+      { lastName: { $regex: last, $options: "i" } },
+    ];
+  }
+}
+
+    
+    if (fromDate || toDate) {
+      filter.createdAt = {};
+      if (fromDate) filter.createdAt.$gte = new Date(fromDate);
+      if (toDate) {
+        const end = new Date(toDate);
+        end.setHours(23, 59, 59, 999); 
+        filter.createdAt.$lte = end;
+      }
+    }
+
 
     const [employee, totalEmployeeCount] = await Promise.all([
       Employee.find(

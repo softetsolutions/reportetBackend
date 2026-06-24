@@ -4,6 +4,8 @@ import {
   fetchHeadquarterData,
   getAllHeadQuartersName,
   getEmployeeHeadQuarter,
+  editHeadquarter,
+  deleteHeadquarter
 } from "../controllers/headQuarterController.js";
 import { authOrOrg, orgAuth } from "../middleware/authMiddleware.js";
 
@@ -13,5 +15,7 @@ router.post("/bulkuiadd", orgAuth, addHeadquarter);
 router.post("/getPaginatedHeadQuarters", orgAuth, fetchHeadquarterData);
 router.get("/getAllHeadQuarterNames", orgAuth, getAllHeadQuartersName);
 router.post("/employee", authOrOrg, getEmployeeHeadQuarter);
+router.put("/:headquarterId", orgAuth, editHeadquarter);
+router.delete("/:headquarterId", orgAuth, deleteHeadquarter);
 
 export default router;

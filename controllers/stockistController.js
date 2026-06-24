@@ -62,9 +62,16 @@ export const getAllStockists = async (req, res) => {
       return res.status(400).json({ message: "Organization ID not found" });
     }
 
-    const filter = {
-      organizationId: organizationId,
-    };
+     const { name, state, address, headQuarter } = req.body;
+
+    const filter = { organizationId };
+
+    if (name?.trim())      filter.name      = { $regex: name.trim(), $options: "i" };
+    if (state?.trim())     filter.state     = { $regex: state.trim(), $options: "i" };
+    if (address?.trim())   filter.address   = { $regex: address.trim(), $options: "i" };
+    if (headQuarter)       filter.headQuarter = headQuarter;
+
+   
 
     const [stockist, stockistCount] = await Promise.all([
       Stockist.find(filter, {
@@ -90,12 +97,42 @@ export const getAllStockists = async (req, res) => {
 };
 export const updateStockist = async (req, res) => {
   try {
-    const stockist = await Stockist.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
+    const { name } = req.body;
+
+    if (!name?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Stockist name is required",
+      });
+    }
+
+    const updated = await Stockist.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        organizationId: req.organization._id,
+      },
+      { $set: { name: name.trim() } },
+      { new: true, runValidators: true },
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Stockist not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Stockist updated successfully",
+      data: updated,
     });
-    res.json(stockist);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    console.error("Error updating stockist:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not update stockist, try again later",
+    });
   }
 };
 

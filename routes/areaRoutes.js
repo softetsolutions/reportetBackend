@@ -9,6 +9,7 @@ import {
   getAreaByMrId,
   getAreasByHeadQuarterId,
   getEmployeeAssignedAreas,
+  editArea
 } from "../controllers/areaController.js";
 
 const router = express.Router();
@@ -26,5 +27,6 @@ router.get("/mr/:mrId", authOrOrg, getAreaByMrId);
 
 //employee level routes
 router.post("/employee", authOrOrg, getEmployeeAssignedAreas);
+router.put("/:areaId", orgAuth, editArea);
 
 export default router;

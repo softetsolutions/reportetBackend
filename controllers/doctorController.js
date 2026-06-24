@@ -113,11 +113,17 @@ export const getAllDoctors = async (req, res) => {
   try {
     const pageNo = Number(req.body.pageNo) || 1;
     const limit = Number(req.body.limit) || 5;
+    const {name,specialty}=req.body
 
     const filter = {
       organizationId: req?.organization?.id,
     };
-
+if (name?.trim()) {
+      filter.name = { $regex: name.trim(), $options: "i" };
+    }
+    if (specialty?.trim()) {
+      filter.specialty = { $regex: specialty.trim(), $options: "i" };
+    }
     const [doctors, totalDoctorCount] = await Promise.all([
       Doctor.find(
         filter,
@@ -238,6 +244,60 @@ export const getDoctorByMrId = async (req, res) => {
     res.status(500).json({
       message: "Failed to retrieve doctors",
       error: error.message,
+    });
+  }
+};
+
+export const editDoctor = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { name, specialty, areaId } = req.body;
+
+    if (!name && !specialty && !areaId) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide at least one field to update",
+      });
+    }
+
+    const updateFields = {};
+    if (name) updateFields.name = name;
+    if (specialty) updateFields.specialty = specialty;
+    if (areaId) updateFields.areaId = areaId;
+
+    // Multi-tenant guard: organizationId must match
+    const updated = await Doctor.findOneAndUpdate(
+      {
+        _id: doctorId,
+        organizationId: req?.organization?._id,
+      },
+      { $set: updateFields },
+      { new: true, runValidators: true },
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Doctor not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Doctor updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "A doctor with this name already exists in this area",
+      });
+    }
+    console.error("Error updating doctor:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not update doctor, try again later",
     });
   }
 };
