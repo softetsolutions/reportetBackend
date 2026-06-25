@@ -1,18 +1,20 @@
 import Sale from "../models/Sale.js";
 import dayjs from "dayjs";
+import { currentYearInIndia } from "../utils/helperFunction.js";
 
 export const createSale = async (req, res) => {
   try {
     const { stockist, month, saleAmount } = req?.body;
 
-    const monthName = new Date().toLocaleString("en-US", {
-      month: "long",
-    });
+    // const monthName = new Date().toLocaleString("en-US", {
+    //   month: "long",
+    // });
 
     const sale = await Sale.create({
       saleBy: req?.employee?._id,
       stockist: stockist,
-      month: monthName.toLowerCase(),
+      month: month.toLowerCase(),
+      year: Number(currentYearInIndia),
       saleAmount: saleAmount,
       organizationId: req?.employee?.organizationId, // automatically assigned
     });
@@ -26,7 +28,8 @@ export const createSale = async (req, res) => {
     if (err?.code === 11000) {
       return res.status(500).json({
         success: false,
-        error: "Sales for this month from you is already submited.",
+        error:
+          "This month’s sales for this stockist have already been submitted by you.",
       });
     }
     res.status(500).json({ success: false, error: err.message });

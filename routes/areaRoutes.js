@@ -6,7 +6,6 @@ import {
   getAreas,
   getAreaById,
   importAreasFromExcel,
-  getAreaByMrId,
   getAreasByHeadQuarterId,
   getEmployeeAssignedAreas,
 } from "../controllers/areaController.js";
@@ -20,9 +19,6 @@ router.post("/", orgAuth, getAreas);
 router.get("/:id", orgAuth, getAreaById);
 router.post("/import", orgAuth, upload.single("file"), importAreasFromExcel);
 router.get("/headquarter/:id", orgAuth, getAreasByHeadQuarterId);
-
-// MR-level route
-router.get("/mr/:mrId", authOrOrg, getAreaByMrId);
 
 //employee level routes
 router.post("/employee", authOrOrg, getEmployeeAssignedAreas);

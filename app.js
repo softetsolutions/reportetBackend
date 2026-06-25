@@ -4,7 +4,6 @@ import dotenv from "dotenv";
 import cors from "cors";
 
 import authRoutes from "./routes/authRoutes.js";
-import mrRoutes from "./routes/mrRoutes.js";
 import orgRoutes from "./routes/orgAuthRoutes.js";
 import stockistRoutes from "./routes/stockistRoutes.js";
 import saleRoutes from "./routes/saleRoutes.js";
@@ -45,7 +44,6 @@ app.get("/ping", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/orgauth", orgRoutes);
 app.use("/api/area", areaRouts);
-app.use("/api/mr", mrRoutes);
 app.use("/api/daily-visit", dailyVisitRoutes);
 app.use("/api/doctor", doctorRoutes);
 app.use("/api/stockists", stockistRoutes);

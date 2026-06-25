@@ -5,9 +5,7 @@ import {
   addDoctor,
   getDoctorsByAreaId,
   getAllDoctors,
-  assignDoctorToMR,
   importDoctorsFromExcel,
-  getDoctorByMrId,
 } from "../controllers/doctorController.js";
 
 const router = express.Router();
@@ -17,10 +15,6 @@ const upload = multer({ dest: "uploads/" });
 router.post("/add", orgAuth, addDoctor);
 router.post("/getAll", orgAuth, getAllDoctors);
 router.get("/getByAreaId/:areaId", auth, getDoctorsByAreaId);
-router.post("/assignToMR", orgAuth, assignDoctorToMR);
 router.post("/import", orgAuth, upload.single("file"), importDoctorsFromExcel);
-
-// MR-level route
-router.get("/mr/:mrId", authOrOrg, getDoctorByMrId);
 
 export default router;

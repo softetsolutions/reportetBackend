@@ -4,16 +4,26 @@ import timezone from "dayjs/plugin/timezone.js";
 
 import dayjs from "../utils/day.js";
 
+function toISTDateString(isoString) {
+  const date = dayjs(isoString);
+  if (!date.isValid()) return null;
+  return date.tz("Asia/Kolkata").format("YYYY-MM-DD");
+}
+
 // Create Daily Visit
 export const createDailyVisit = async (req, res) => {
   try {
-    const { areaId, doctorId, remark } = req.body;
+    const { areaId, doctorId, remark, visitDate } = req.body;
     const employeeId = req?.employee?._id;
     const organizationId = req?.employee?.organizationId;
 
-    if (!areaId.length || !doctorId.length || !remark) {
+    if (!areaId.length || !doctorId.length || !visitDate) {
       return res.status(400).json({ message: "All fields are required" });
     }
+
+    const normalizedVisitDate = dayjs(visitDate)
+      .tz("Asia/Kolkata")
+      .format("YYYY-MM-DD");
 
     const dailyVisit = await DailyVisit.create({
       areaId,
@@ -21,54 +31,25 @@ export const createDailyVisit = async (req, res) => {
       employeeId,
       remark,
       organizationId,
+      visitDate: normalizedVisitDate,
     });
-
-    const submitedVisitDetails = await DailyVisit.findById(dailyVisit?.id, {
-      updatedAt: 0,
-      __v: 0,
-    })
-      .populate("doctorId", "_id name specialty")
-      .populate("areaId", "name _id");
 
     res.status(201).json({
       success: true,
       message: "Daily visit created successfully",
-      submissionDetail: submitedVisitDetails,
+      submissionDetail: dailyVisit,
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      message: "Failed to create daily visit",
-      error: error.message,
-    });
-  }
-};
-
-// Get Doctors with Remarks
-export const getDoctorsWithRemarks = async (req, res) => {
-  try {
-    const { mrId, areaId, startDate, endDate } = req.query;
-
-    if (!mrId || !areaId || !startDate || !endDate) {
-      return res.status(400).json({
-        message: "mrId, areaId, startDate, and endDate are required",
+    console.error("Srroe in reporting daily visit", error);
+    if (error?.code === 11000) {
+      return res.status(500).json({
+        success: false,
+        error: "You have already submitted the daily visit report for this day",
       });
     }
-
-    const visits = await DailyVisit.find({
-      mrId,
-      areaId,
-      date: { $gte: new Date(startDate), $lte: new Date(endDate) },
-    })
-      .populate("doctorId", "name _id")
-      .select("doctorId remark -_id");
-
-    res.status(200).json(visits);
-  } catch (err) {
-    console.error("failed to fetch visit", err.message);
     res.status(500).json({
-      message: "Failed to retrieve doctors with remarks",
-      error: err.message,
+      success: false,
+      error: error.message,
     });
   }
 };
@@ -81,28 +62,14 @@ export const getDailyVisitList = async (req, res) => {
     }
     const { from, to, rowsPerPage = 10, pageNumber } = req.body;
     const limit = Math.min(parseInt(rowsPerPage) || 20, 50);
-    const fromDate = from ? new Date(from) : null;
-    const toDate = to ? new Date(to) : null;
-
-    if (fromDate && isNaN(fromDate.getTime())) {
-      res.status(400).json({
-        success: false,
-        message: "Invalid from data",
-      });
-    }
-
-    if (toDate && isNaN(toDate.getTime())) {
-      res.status(400).json({
-        success: false,
-        message: "Invalid to date",
-      });
-    }
+    const fromDate = toISTDateString(from);
+    const toDate = toISTDateString(to);
 
     const dailyVisitWithFilter = await DailyVisit.find(
       {
         employeeId,
-        ...(fromDate && { createdAt: { $gte: from } }),
-        ...(toDate && { createdAt: { $lte: to } }),
+        ...(fromDate && { visitDate: { $gte: fromDate } }),
+        ...(toDate && { visitDate: { $lte: toDate } }),
       },
       {
         _id: 1,
@@ -111,11 +78,12 @@ export const getDailyVisitList = async (req, res) => {
         doctorId: 1,
         assistedBy: 1,
         createdAt: 1,
+        visitDate: 1,
       },
     )
       .populate("doctorId", "_id name specialty")
       .populate("areaId", "name _id")
-      .sort({ _id: -1 })
+      .sort({ _id: 1 })
       .skip(rowsPerPage * (pageNumber - 1))
       .limit(limit + 1)
       .lean();
@@ -142,22 +110,11 @@ export const getOrganizationDailyVisitList = async (req, res) => {
     pageNo = Number(req.body.pageNo) || 1;
     limit = Number(req.body.limit) || 5;
 
-    if (dateFrom && dateTo) {
-      dateFrom = dayjs
-        .tz(dateFrom, "Asia/Kolkata")
-        .startOf("day")
-        .utc()
-        .toDate();
-      dateTo = dayjs.tz(dateTo, "Asia/Kolkata").endOf("day").utc().toDate();
-    }
     const filter = {
       organizationId: req?.organization?.id,
       ...(employeeId && { employeeId: employeeId }),
-      ...(dateFrom &&
-        dateTo && {
-          createdAt: { $gte: dateFrom },
-          createdAt: { $lte: dateTo },
-        }),
+      ...(dateFrom && { visitDate: { $gte: dateFrom } }),
+      ...(dateTo && { visitDate: { $lte: dateTo } }),
     };
 
     const [dailyVistList, dailyVistListCount] = await Promise.all([
