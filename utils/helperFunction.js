@@ -19,3 +19,27 @@ export const generateOrganizationCode = (organizationName) => {
 
   return `${baseCode}${uniqueIdentifier}`;
 };
+
+export const getCellStringValue = (value) => {
+  if (value == null) return "";
+
+  // plain string / number
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value).trim();
+  }
+
+  // rich text cell
+  if (value?.richText && Array.isArray(value.richText)) {
+    return value.richText
+      .map((item) => item.text || "")
+      .join("")
+      .trim();
+  }
+
+  // fallback
+  return String(value).trim();
+};
+
+export const currentYearInIndia = new Date(
+  new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
+).getFullYear();
