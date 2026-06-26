@@ -1,7 +1,7 @@
 import Area from "../models/Area.js";
 import Employee from "../models/Employee.js";
 import HeadQuarter from "../models/HeadQuarter.js";
-import Mr from "../models/Mr.js";
+
 import fs from "fs";
 import ExcelJS from "exceljs";
 
@@ -156,50 +156,6 @@ export const importAreasFromExcel = async (req, res) => {
     res
       .status(500)
       .json({ message: "Failed to import areas from Excel file." });
-  }
-};
-
-export const getAreaByMrId = async (req, res) => {
-  try {
-    const { mrId } = req.params;
-
-    // If logged in as MR
-    if (req.mr) {
-      // MR can access their own areas only
-      if (req.mr._id.toString() !== mrId) {
-        return res
-          .status(403)
-          .json({ message: "Forbidden: Cannot access other MR's areas" });
-      }
-      const selfMr = await Mr.findById(mrId).populate(
-        "assignedAreas",
-        "name _id",
-      );
-      return res.status(200).json(selfMr.assignedAreas || []);
-    }
-
-    // If logged in as Organization
-    if (req.organization) {
-      const mr = await Mr.findOne({
-        _id: mrId,
-        organizationId: req.organization._id,
-      }).populate("assignedAreas", "name _id");
-
-      if (!mr) {
-        return res
-          .status(404)
-          .json({ message: "MR not found or no assigned areas" });
-      }
-
-      return res.status(200).json(mr.assignedAreas || []);
-    }
-
-    res.status(401).json({ message: "Unauthorized" });
-  } catch (error) {
-    console.error("Get Areas by MR ID Error:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to retrieve areas", error: error.message });
   }
 };
 

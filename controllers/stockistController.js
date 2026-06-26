@@ -28,14 +28,26 @@ export const getStockistOptions = async (req, res) => {
     if (!organizationId) {
       throw new Error("Organization id is not defined");
     }
+    // assignedHeadQuarters
 
-    const stockistOptions = await Stockist.find(
-      { organizationId: organizationId },
-      {
-        _id: 1,
-        name: 1,
-      },
-    );
+    if (req?.employee && !req?.employee?.assignedHeadQuarters?.length) {
+      return res.status(200).json({
+        success: false,
+        message: "Headquarter not assigned to the employee",
+      });
+    }
+
+    const filter = {
+      organizationId: organizationId,
+      ...(req?.employee?.assignedHeadQuarters?.length && {
+        headQuarter: { $in: req?.employee?.assignedHeadQuarters },
+      }),
+    };
+
+    const stockistOptions = await Stockist.find(filter, {
+      _id: 1,
+      name: 1,
+    });
 
     res.json({
       success: true,
@@ -56,7 +68,6 @@ export const getAllStockists = async (req, res) => {
     const limit = Number(req?.body?.limit) || 10;
     const organizationId =
       req.organization?._id || req.employee?.organizationId;
-      console.log("Verification", organizationId)
 
     if (!organizationId) {
       return res.status(400).json({ message: "Organization ID not found" });
@@ -80,8 +91,11 @@ export const getAllStockists = async (req, res) => {
         address: 1,
         state: 1,
         headQuarter: 1,
-      }).populate("headQuarter", "headQuarterName _id").skip((pageNo - 1) * limit).limit(limit),
-      
+      })
+        .populate("headQuarter", "headQuarterName _id")
+        .skip((pageNo - 1) * limit)
+        .limit(limit),
+
       Stockist.countDocuments(filter),
     ]);
 

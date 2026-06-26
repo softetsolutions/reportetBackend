@@ -30,6 +30,7 @@ const saleSchema = new mongoose.Schema(
       ],
       required: true,
     },
+    year: { type: Number, required: true },
     saleAmount: { type: Number, required: true },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -40,6 +41,9 @@ const saleSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-saleSchema.index({ organizationId: 1, saleBy: 1, month: 1 }, { unique: true });
+saleSchema.index(
+  { organizationId: 1, saleBy: 1, month: 1, year: 1, stockist: 1 },
+  { unique: true },
+);
 
 export default mongoose.model("Sale", saleSchema);
