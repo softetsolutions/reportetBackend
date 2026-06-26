@@ -1,6 +1,7 @@
 import Area from "../models/Area.js";
 import Employee from "../models/Employee.js";
 import HeadQuarter from "../models/HeadQuarter.js";
+import Doctor from "../models/Doctor.js";
 
 import fs from "fs";
 import ExcelJS from "exceljs";
@@ -297,6 +298,47 @@ export const editArea = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Could not update area, try again later",
+    });
+  }
+};
+
+export const deleteArea = async (req, res) => {
+  try {
+    const { areaId } = req.params;
+
+
+    const linkedDoctorCount = await Doctor.countDocuments({ areaId });
+
+    if (linkedDoctorCount > 0) {
+      return res.status(409).json({
+        success: false,
+        hasLinkedDoctors: true,
+        doctorCount: linkedDoctorCount,
+        message: `This area has ${linkedDoctorCount} doctor(s) assigned to it. Please delete or move them to another area before deleting this area.`,
+      });
+    }
+
+    const deleted = await Area.findOneAndDelete({
+      _id: areaId,
+      organizationId: req?.organization?._id,
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Area not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Area deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting area:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not delete area, try again later",
     });
   }
 };

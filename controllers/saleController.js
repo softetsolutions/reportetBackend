@@ -197,20 +197,52 @@ export const getAllSales = async (req, res) => {
 
 export const updateSale = async (req, res) => {
   try {
-    const sale = await Sale.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-    });
-    res.json(sale);
+    const { id } = req.params;
+
+    const updatedSale = await Sale.findOneAndUpdate(
+      {
+        _id: id,
+        organizationId: req?.organization?.id, 
+      },
+      req.body,
+      { new: true, runValidators: true }
+    )
+      .populate("saleBy", "_id firstName lastName role")
+      .populate("stockist", "_id name");
+
+    if (!updatedSale) {
+      return res.status(404).json({
+        success: false,
+        message: "Sale not found or not part of your organization",
+      });
+    }
+
+    res.status(200).json({ success: true, data: updatedSale });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    console.error("Failed to update sale", err);
+    res.status(400).json({ success: false, error: err.message });
   }
 };
 
 export const deleteSale = async (req, res) => {
   try {
-    await Sale.findByIdAndDelete(req.params.id);
-    res.json({ message: "Deleted successfully" });
+    const { id } = req.params;
+
+    const deleted = await Sale.findOneAndDelete({
+      _id: id,
+      organizationId: req?.organization?.id, 
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Sale not found or not part of your organization",
+      });
+    }
+
+    res.status(200).json({ success: true, message: "Deleted successfully" });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    console.error("Failed to delete sale", err);
+    res.status(400).json({ success: false, error: err.message });
   }
 };

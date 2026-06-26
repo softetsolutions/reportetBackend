@@ -15,7 +15,7 @@ router.post("/", auth, createSale);
 router.post("/getEmployeeSales", auth, getSalesListOfEmployee);
 router.post("/getAllSales", orgAuth, getAllSales);
 router.get("/alreadySubmitedSales", auth, alreadySubmitedSale);
-router.put("/:id", auth, updateSale);
-router.delete("/:id", auth, deleteSale);
+router.put("/:id", orgAuth, updateSale);
+router.delete("/:id", orgAuth, deleteSale);
 
 export default router;

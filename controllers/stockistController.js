@@ -152,9 +152,29 @@ export const updateStockist = async (req, res) => {
 
 export const deleteStockist = async (req, res) => {
   try {
-    await Stockist.findByIdAndDelete(req.params.id);
-    res.json({ message: "Deleted successfully" });
+    const deleted = await Stockist.findOneAndDelete({
+      _id: req.params.id,
+      organizationId: req?.organization?._id,  
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Stockist not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Stockist deleted successfully",
+    });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    console.error("Error deleting stockist:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not delete stockist, try again later",
+    });
   }
 };
+
+

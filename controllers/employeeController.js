@@ -1,9 +1,11 @@
 import mongoose from "mongoose";
 import HeadQuarter from "../models/HeadQuarter.js";
 import Employee from "../models/Employee.js";
-import brevo from "../config/mailer.js";
-import sendMail from "../config/mailer.js";
+//import {brevo} from "../config/mailer.js";
+import {sendMail,sendForgotPasswordMail} from "../config/mailer.js";
+
 import Area from "../models/Area.js";
+import crypto from 'crypto'
 import Doctor from "../models/Doctor.js";
 export const onboardEmployee = async (req, res) => {
   try {
@@ -401,6 +403,144 @@ export const getAssignedDoctorAndArea = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Can not get assigned doctor and area details",
+    });
+  }
+};
+
+
+export const forgotPassword = async (req, res) => {
+  try {
+    const { userName } = req.body;
+
+    if (!userName?.trim()) {
+      return res.status(422).json({
+        success: false,
+        message: "Username is required",
+      });
+    }
+
+    const employee = await Employee.findOne({ userName: userName.trim() });
+
+    
+    if (!employee) {
+      return res.status(200).json({
+        success: true,
+        message: "If this username exists, a reset link has been sent to the registered email.",
+      });
+    }
+
+    if (!employee.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is deactivated. Please contact your administrator.",
+      });
+    }
+
+    
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+
+    
+    employee.resetPasswordToken = hashedToken;
+    employee.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); 
+    await employee.save({ validateBeforeSave: false });
+
+    
+    const resetUrl = `${process.env.FRONTEND_URL}/reportet/employee/reset-password/${rawToken}`;
+
+    try {
+      // await sendMail(
+      //   "passwordReset",           
+      //   resetUrl,
+      //   null,
+      //   [{ email: employee.email, name: employee.displayName }],
+      // );
+      await sendForgotPasswordMail(
+  resetUrl,
+  [{ email: employee.email, name: employee.displayName }]
+);
+    } catch (mailError) {
+      
+      employee.resetPasswordToken = null;
+      employee.resetPasswordExpires = null;
+      await employee.save({ validateBeforeSave: false });
+
+      console.error("Mail send failed:", mailError);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send reset email. Please try again.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "If this username exists, a reset link has been sent to the registered email.",
+    });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
+  }
+};
+
+export const resetPassword = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { newPassword, confirmPassword } = req.body;
+
+    if (!newPassword || !confirmPassword) {
+      return res.status(422).json({
+        success: false,
+        message: "Both password fields are required",
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(422).json({
+        success: false,
+        message: "Passwords do not match",
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(422).json({
+        success: false,
+        message: "Password must be at least 8 characters",
+      });
+    }
+
+    
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+    const employee = await Employee.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpires: { $gt: new Date() }, 
+    });
+
+    if (!employee) {
+      return res.status(400).json({
+        success: false,
+        message: "Reset link is invalid or has expired. Please request a new one.",
+      });
+    }
+
+    
+    employee.password = newPassword;
+    employee.resetPasswordToken = null;
+    employee.resetPasswordExpires = null;
+    await employee.save(); 
+
+    res.status(200).json({
+      success: true,
+      message: "Password reset successful. You can now log in with your new password.",
+    });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
     });
   }
 };

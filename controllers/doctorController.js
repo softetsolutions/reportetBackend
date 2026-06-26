@@ -94,6 +94,7 @@ if (name?.trim()) {
           _id: 1,
           name: 1,
           specialty: 1,
+          areaId: 1,
         },
         {
           skip: (pageNo - 1) * limit,
@@ -321,3 +322,33 @@ export const editDoctor = async (req, res) => {
     });
   }
 };
+
+export const deleteDoctor = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+
+    const deleted = await Doctor.findOneAndDelete({
+      _id: doctorId,
+      organizationId: req?.organization?._id,
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Doctor not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Doctor deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting doctor:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not delete doctor, try again later",
+    });
+  }
+};
+

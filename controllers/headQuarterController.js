@@ -307,7 +307,6 @@ export const editHeadquarter = async (req, res) => {
 };
 
 export const deleteHeadquarter = async (req, res) => {
-  const session = await mongoose.startSession();
   try {
     const { headquarterId } = req.params;
 
@@ -318,53 +317,53 @@ export const deleteHeadquarter = async (req, res) => {
       });
     }
 
-    await session.withTransaction(async () => {
-      
-      const deleted = await HeadQuarter.findOneAndDelete(
-        {
-          _id: headquarterId,
-          organizationId: req?.organization?.id,
-        },
-        { session },
-      );
-
-      if (!deleted) {
-        
-        const err = new Error("Headquarter not found or access denied");
-        err.statusCode = 404;
-        throw err;
-      }
-
-      
-      const areaIds = await Area.find(
-        { headQuarterId: headquarterId },
-        { _id: 1 },
-        { session },
-      ).then((docs) => docs.map((d) => d._id));
-
-      if (areaIds.length) {
-        await Area.deleteMany({ _id: { $in: areaIds } }, { session });
-        await Doctor.deleteMany({ areaId: { $in: areaIds } }, { session });
-      }
+    
+    const linkedAreaCount = await Area.countDocuments({
+      headQuarterId: headquarterId,
     });
+
+    if (linkedAreaCount > 0) {
+      
+      const linkedAreas = await Area.find(
+        { headQuarterId: headquarterId },
+        { _id: 1 }
+      );
+      const areaIds = linkedAreas.map((a) => a._id);
+      const linkedDoctorCount = await Doctor.countDocuments({
+        areaId: { $in: areaIds },
+      });
+
+      return res.status(409).json({
+        success: false,
+        message:
+          linkedDoctorCount > 0
+            ? `Cannot delete: this headquarter has ${linkedAreaCount} area(s) and ${linkedDoctorCount} doctor(s) linked to it. Please remove them first.`
+            : `Cannot delete: this headquarter has ${linkedAreaCount} area(s) linked to it. Please remove them first.`,
+      });
+    }
+
+    
+    const deleted = await HeadQuarter.findOneAndDelete({
+      _id: headquarterId,
+      organizationId: req?.organization?.id,
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Headquarter not found or access denied",
+      });
+    }
 
     res.status(200).json({
       success: true,
-      message: "Headquarter and all related data deleted successfully",
+      message: "Headquarter deleted successfully",
     });
   } catch (error) {
-    if (error.statusCode === 404) {
-      return res.status(404).json({
-        success: false,
-        message: error.message,
-      });
-    }
     console.error("Error deleting headquarter:", error.message);
     res.status(500).json({
       success: false,
       message: "Could not delete headquarter, try again later",
     });
-  } finally {
-    await session.endSession();
   }
 };
