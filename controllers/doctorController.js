@@ -76,11 +76,17 @@ export const getAllDoctors = async (req, res) => {
   try {
     const pageNo = Number(req.body.pageNo) || 1;
     const limit = Number(req.body.limit) || 5;
+    const {name,specialty}=req.body
 
     const filter = {
       organizationId: req?.organization?.id,
     };
-
+if (name?.trim()) {
+      filter.name = { $regex: name.trim(), $options: "i" };
+    }
+    if (specialty?.trim()) {
+      filter.specialty = { $regex: specialty.trim(), $options: "i" };
+    }
     const [doctors, totalDoctorCount] = await Promise.all([
       Doctor.find(
         filter,
@@ -88,6 +94,7 @@ export const getAllDoctors = async (req, res) => {
           _id: 1,
           name: 1,
           specialty: 1,
+          areaId: 1,
         },
         {
           skip: (pageNo - 1) * limit,
@@ -221,3 +228,127 @@ export const importDoctorsFromExcel = async (req, res) => {
       .json({ message: "Failed to import doctors from Excel file." });
   }
 };
+
+export const getDoctorByMrId = async (req, res) => {
+  try {
+    const { mrId } = req.params;
+    const orgId = req.headers["x-org-id"];
+
+    // Fetch MR
+    const mr = await Mr.findOne({
+      _id: mrId,
+      role: "mr",
+      organizationId: orgId,
+      //organizationId: req.organization?._id // if org request
+    }).populate("assignedDoctors", "name _id");
+
+    if (!mr) {
+      // If MR is accessing themselves, check token
+      if (req.mr && req.mr._id.toString() === mrId) {
+        const selfMr = await Mr.findById(mrId).populate(
+          "assignedDoctors",
+          "name _id",
+        );
+        if (!selfMr || selfMr.assignedDoctors.length === 0)
+          return res.status(404).json({ message: "No assigned doctors found" });
+        return res.status(200).json(selfMr.assignedDoctors);
+      }
+      return res.status(404).json({ message: "MR not found" });
+    }
+
+    if (!mr.assignedDoctors || mr.assignedDoctors.length === 0) {
+      return res.status(404).json({ message: "No assigned doctors found" });
+    }
+
+    res.status(200).json(mr.assignedDoctors);
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to retrieve doctors",
+      error: error.message,
+    });
+  }
+};
+
+export const editDoctor = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { name, specialty, areaId } = req.body;
+
+    if (!name && !specialty && !areaId) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide at least one field to update",
+      });
+    }
+
+    const updateFields = {};
+    if (name) updateFields.name = name;
+    if (specialty) updateFields.specialty = specialty;
+    if (areaId) updateFields.areaId = areaId;
+
+    // Multi-tenant guard: organizationId must match
+    const updated = await Doctor.findOneAndUpdate(
+      {
+        _id: doctorId,
+        organizationId: req?.organization?._id,
+      },
+      { $set: updateFields },
+      { new: true, runValidators: true },
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Doctor not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Doctor updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "A doctor with this name already exists in this area",
+      });
+    }
+    console.error("Error updating doctor:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not update doctor, try again later",
+    });
+  }
+};
+
+export const deleteDoctor = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+
+    const deleted = await Doctor.findOneAndDelete({
+      _id: doctorId,
+      organizationId: req?.organization?._id,
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Doctor not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Doctor deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting doctor:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not delete doctor, try again later",
+    });
+  }
+};
+

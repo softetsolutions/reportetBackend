@@ -186,3 +186,60 @@ export const getDailyVisitInfo = async (req, res) => {
     });
   }
 };
+
+
+// UPDATE a daily visit (orgAuth only)
+export const updateDailyVisit = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const updatedVisit = await DailyVisit.findOneAndUpdate(
+      {
+        _id: id,
+        organizationId: req?.organization?.id, // scope to org for safety
+      },
+      req.body,
+      { new: true, runValidators: true }
+    )
+      .populate("employeeId", "_id firstName lastName role")
+      .populate("doctorId", "_id name")
+      .populate("areaId", "_id name")
+      .populate("assistedBy", "_id firstName lastName");
+
+    if (!updatedVisit) {
+      return res.status(404).json({
+        success: false,
+        message: "Daily visit not found or not part of your organization",
+      });
+    }
+
+    res.status(200).json({ success: true, data: updatedVisit });
+  } catch (error) {
+    console.error("Failed to update daily visit", error);
+    res.status(500).json({ success: false, message: error?.message });
+  }
+};
+
+// DELETE a daily visit (orgAuth only)
+export const deleteDailyVisit = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const deleted = await DailyVisit.findOneAndDelete({
+      _id: id,
+      organizationId: req?.organization?.id, // scope to org for safety
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Daily visit not found or not part of your organization",
+      });
+    }
+
+    res.status(200).json({ success: true, message: "Deleted successfully" });
+  } catch (error) {
+    console.error("Failed to delete daily visit", error);
+    res.status(500).json({ success: false, message: error?.message });
+  }
+};

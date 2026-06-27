@@ -5,6 +5,8 @@ import {
   createDailyVisit,
   getDailyVisitList,
   getOrganizationDailyVisitList,
+  updateDailyVisit,
+  deleteDailyVisit
 } from "../controllers/dailyVisit.js";
 
 const router = express.Router();
@@ -17,5 +19,7 @@ router.post(
   orgAuth,
   getOrganizationDailyVisitList,
 );
+router.put("/:id", orgAuth, updateDailyVisit);      
+router.delete("/:id", orgAuth, deleteDailyVisit);
 
 export default router;

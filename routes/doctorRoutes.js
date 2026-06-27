@@ -6,6 +6,9 @@ import {
   getDoctorsByAreaId,
   getAllDoctors,
   importDoctorsFromExcel,
+  getDoctorByMrId,
+  editDoctor,
+  deleteDoctor
 } from "../controllers/doctorController.js";
 
 const router = express.Router();
@@ -16,5 +19,10 @@ router.post("/add", orgAuth, addDoctor);
 router.post("/getAll", orgAuth, getAllDoctors);
 router.get("/getByAreaId/:areaId", auth, getDoctorsByAreaId);
 router.post("/import", orgAuth, upload.single("file"), importDoctorsFromExcel);
+
+// MR-level route
+router.get("/mr/:mrId", authOrOrg, getDoctorByMrId);
+router.put("/:doctorId", orgAuth, editDoctor);
+router.delete("/:doctorId",orgAuth,deleteDoctor);
 
 export default router;

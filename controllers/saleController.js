@@ -127,29 +127,41 @@ export const getSalesListOfEmployee = async (req, res) => {
 
 export const getAllSales = async (req, res) => {
   try {
-    let { employeeId, dateFrom, dateTo, pageNo = 1, limit = 10 } = req?.body;
+    let { employeeId, months,years, pageNo = 1, limit = 10 } = req?.body;
 
     pageNo = Number(req.body.pageNo) || 1;
     limit = Number(req.body.limit) || 5;
 
-    if (dateFrom && dateTo) {
-      dateFrom = dayjs
-        .tz(dateFrom, "Asia/Kolkata")
-        .startOf("day")
-        .utc()
-        .toDate();
-      dateTo = dayjs.tz(dateTo, "Asia/Kolkata").endOf("day").utc().toDate();
-    }
+    // if (dateFrom && dateTo) {
+    //   dateFrom = dayjs
+    //     .tz(dateFrom, "Asia/Kolkata")
+    //     .startOf("day")
+    //     .utc()
+    //     .toDate();
+    //   dateTo = dayjs.tz(dateTo, "Asia/Kolkata").endOf("day").utc().toDate();
+    // }
 
     const filter = {
       organizationId: req?.organization?.id,
       ...(employeeId && { employeeId: employeeId }),
-      ...(dateFrom &&
-        dateTo && {
-          createdAt: { $gte: dateFrom },
-          createdAt: { $lte: dateTo },
-        }),
+      ...(months && months.length > 0 && { month: { $in: months } }),
+      
     };
+
+    if (years?.length > 0) {
+  const yearConditions = years.map((year) => {
+    const start = new Date(`${year}-01-01T00:00:00.000Z`);
+    const end = new Date(`${year}-12-31T23:59:59.999Z`);
+    return { createdAt: { $gte: start, $lte: end } };
+  });
+
+
+  if (yearConditions.length === 1) {
+    filter.createdAt = yearConditions[0].createdAt;
+  } else {
+    filter.$or = yearConditions;
+  }
+}
 
     const [sales, totalSalesCount] = await Promise.all([
       Sale.find(
@@ -185,20 +197,52 @@ export const getAllSales = async (req, res) => {
 
 export const updateSale = async (req, res) => {
   try {
-    const sale = await Sale.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-    });
-    res.json(sale);
+    const { id } = req.params;
+
+    const updatedSale = await Sale.findOneAndUpdate(
+      {
+        _id: id,
+        organizationId: req?.organization?.id, 
+      },
+      req.body,
+      { new: true, runValidators: true }
+    )
+      .populate("saleBy", "_id firstName lastName role")
+      .populate("stockist", "_id name");
+
+    if (!updatedSale) {
+      return res.status(404).json({
+        success: false,
+        message: "Sale not found or not part of your organization",
+      });
+    }
+
+    res.status(200).json({ success: true, data: updatedSale });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    console.error("Failed to update sale", err);
+    res.status(400).json({ success: false, error: err.message });
   }
 };
 
 export const deleteSale = async (req, res) => {
   try {
-    await Sale.findByIdAndDelete(req.params.id);
-    res.json({ message: "Deleted successfully" });
+    const { id } = req.params;
+
+    const deleted = await Sale.findOneAndDelete({
+      _id: id,
+      organizationId: req?.organization?.id, 
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Sale not found or not part of your organization",
+      });
+    }
+
+    res.status(200).json({ success: true, message: "Deleted successfully" });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    console.error("Failed to delete sale", err);
+    res.status(400).json({ success: false, error: err.message });
   }
 };

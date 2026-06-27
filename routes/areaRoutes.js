@@ -8,6 +8,8 @@ import {
   importAreasFromExcel,
   getAreasByHeadQuarterId,
   getEmployeeAssignedAreas,
+  editArea,
+  deleteArea
 } from "../controllers/areaController.js";
 
 const router = express.Router();
@@ -22,5 +24,8 @@ router.get("/headquarter/:id", orgAuth, getAreasByHeadQuarterId);
 
 //employee level routes
 router.post("/employee", authOrOrg, getEmployeeAssignedAreas);
+router.put("/:areaId", orgAuth, editArea);
+router.delete("/:areaId",orgAuth, deleteArea);
+
 
 export default router;

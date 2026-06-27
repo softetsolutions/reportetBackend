@@ -47,14 +47,28 @@ export const fetchHeadquarterData = async (req, res) => {
   try {
     let { pageNo = 1, limit = 5 } = req.body;
     limit = Number(limit);
+
+     const { headQuarterName, location } = req.body;
+
+    const matchFilter = {
+      organizationId: new Types.ObjectId(req?.organization?.id),
+    };
+
+    if (headQuarterName?.trim()) {
+      matchFilter.headQuarterName = { $regex: headQuarterName.trim(), $options: "i" };
+    }
+    if (location?.trim()) {
+      matchFilter.location = { $regex: location.trim(), $options: "i" };
+    }
+
     const headQuartersDetails = await HeadQuarter.aggregate([
       {
         $facet: {
           headQuarterDetail: [
             {
-              $match: {
-                organizationId: new Types.ObjectId(req?.organization?.id),
-              },
+              $match: 
+                matchFilter,
+              
             },
             {
               $sort: {
@@ -114,9 +128,9 @@ export const fetchHeadquarterData = async (req, res) => {
 
           totalCount: [
             {
-              $match: {
-                organizationId: new Types.ObjectId(req?.organization?.id),
-              },
+              $match: 
+                 matchFilter
+              
             },
             {
               $count: "totalHeadquarters",
@@ -225,6 +239,131 @@ export const getEmployeeHeadQuarter = async (req, res) => {
     res.json({
       success: false,
       message: "Can not fetch headquarters, try again later",
+    });
+  }
+};
+
+
+
+export const editHeadquarter = async (req, res) => {
+  try {
+    const { headquarterId } = req.params;
+    const { headQuarterName, location } = req.body;
+
+    if (!headquarterId) {
+      return res.status(400).json({
+        success: false,
+        message: "Headquarter ID is required",
+      });
+    }
+
+    if (!headQuarterName && !location) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide at least one field to update",
+      });
+    }
+
+    const updateFields = {};
+    if (headQuarterName) updateFields.headQuarterName = headQuarterName;
+    if (location) updateFields.location = location;
+
+    
+    const updated = await HeadQuarter.findOneAndUpdate(
+      {
+        _id: headquarterId,
+        organizationId: req?.organization?.id, 
+      },
+      { $set: updateFields },
+      { new: true, runValidators: true },
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Headquarter not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Headquarter updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+   
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "A headquarter with this name already exists in your organization",
+      });
+    }
+    console.error("Error updating headquarter:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not update headquarter, try again later",
+    });
+  }
+};
+
+export const deleteHeadquarter = async (req, res) => {
+  try {
+    const { headquarterId } = req.params;
+
+    if (!headquarterId) {
+      return res.status(400).json({
+        success: false,
+        message: "Headquarter ID is required",
+      });
+    }
+
+    
+    const linkedAreaCount = await Area.countDocuments({
+      headQuarterId: headquarterId,
+    });
+
+    if (linkedAreaCount > 0) {
+      
+      const linkedAreas = await Area.find(
+        { headQuarterId: headquarterId },
+        { _id: 1 }
+      );
+      const areaIds = linkedAreas.map((a) => a._id);
+      const linkedDoctorCount = await Doctor.countDocuments({
+        areaId: { $in: areaIds },
+      });
+
+      return res.status(409).json({
+        success: false,
+        message:
+          linkedDoctorCount > 0
+            ? `Cannot delete: this headquarter has ${linkedAreaCount} area(s) and ${linkedDoctorCount} doctor(s) linked to it. Please remove them first.`
+            : `Cannot delete: this headquarter has ${linkedAreaCount} area(s) linked to it. Please remove them first.`,
+      });
+    }
+
+    
+    const deleted = await HeadQuarter.findOneAndDelete({
+      _id: headquarterId,
+      organizationId: req?.organization?.id,
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Headquarter not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Headquarter deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting headquarter:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not delete headquarter, try again later",
     });
   }
 };

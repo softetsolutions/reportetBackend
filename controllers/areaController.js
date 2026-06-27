@@ -1,5 +1,8 @@
 import Area from "../models/Area.js";
 import Employee from "../models/Employee.js";
+import HeadQuarter from "../models/HeadQuarter.js";
+import Doctor from "../models/Doctor.js";
+
 import fs from "fs";
 import ExcelJS from "exceljs";
 
@@ -51,11 +54,29 @@ export const getAreas = async (req, res) => {
   try {
     const pageNo = Number(req.body.pageNo) || 1;
     const limit = Number(req.body.limit) || 5;
+    const {name,headQuarterName}=req.body
 
     const filter = {
       organizationId: req?.organization?.id,
     };
 
+      if (name?.trim()) {
+      filter.name = { $regex: name.trim(), $options: "i" };
+    }
+
+    
+    if (headQuarterName?.trim()) {
+      const matchingHQs = await HeadQuarter.find(
+        {
+          headQuarterName: { $regex: headQuarterName.trim(), $options: "i" },
+          organizationId: req?.organization?.id,
+        },
+        { _id: 1 }
+      );
+
+      const hqIds = matchingHQs.map((hq) => hq._id);
+      filter.headQuarterId = { $in: hqIds };
+    }
     const [areas, totalAreaCount] = await Promise.all([
       Area.find(
         filter,
@@ -224,6 +245,100 @@ export const getEmployeeAssignedAreas = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Unable to get the employee assigned area.",
+    });
+  }
+};
+
+export const editArea = async (req, res) => {
+  try {
+    const { areaId } = req.params;
+    const { name, headQuarterId } = req.body;
+
+    if (!name && !headQuarterId) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide at least one field to update",
+      });
+    }
+
+    const updateFields = {};
+    if (name) updateFields.name = name;
+    if (headQuarterId) updateFields.headQuarterId = headQuarterId;
+
+    // Multi-tenant guard: organizationId must match
+    const updated = await Area.findOneAndUpdate(
+      {
+        _id: areaId,
+        organizationId: req?.organization?._id,
+      },
+      { $set: updateFields },
+      { new: true, runValidators: true },
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Area not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Area updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "An area with this name already exists in this headquarter",
+      });
+    }
+    console.error("Error updating area:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not update area, try again later",
+    });
+  }
+};
+
+export const deleteArea = async (req, res) => {
+  try {
+    const { areaId } = req.params;
+
+
+    const linkedDoctorCount = await Doctor.countDocuments({ areaId });
+
+    if (linkedDoctorCount > 0) {
+      return res.status(409).json({
+        success: false,
+        hasLinkedDoctors: true,
+        doctorCount: linkedDoctorCount,
+        message: `This area has ${linkedDoctorCount} doctor(s) assigned to it. Please delete or move them to another area before deleting this area.`,
+      });
+    }
+
+    const deleted = await Area.findOneAndDelete({
+      _id: areaId,
+      organizationId: req?.organization?._id,
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Area not found or access denied",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Area deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting area:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not delete area, try again later",
     });
   }
 };

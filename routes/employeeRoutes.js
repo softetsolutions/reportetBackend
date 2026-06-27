@@ -7,6 +7,8 @@ import {
   updateEmployee,
   getAssignedDoctorAndArea,
   getAllEmployeeOptions,
+  forgotPassword,
+  resetPassword
 } from "../controllers/employeeController.js";
 
 const router = express.Router();
@@ -17,5 +19,7 @@ router.get("/getAllEmployeeOptions", orgAuth, getAllEmployeeOptions);
 router.get("/getAssignedDetails", auth, getAssignedDoctorAndArea);
 router.get("/:employeeId", orgAuth, getEmployeeById);
 router.patch("/:employeeId", orgAuth, updateEmployee);
+router.post("/forgot-password", forgotPassword);       
+router.post("/reset-password/:token", resetPassword);
 
 export default router;
