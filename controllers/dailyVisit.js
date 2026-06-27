@@ -1,6 +1,7 @@
 import DailyVisit from "../models/Daily-Visit.js";
 import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
+import mongoose from "mongoose";
 
 import dayjs from "../utils/day.js";
 
@@ -243,3 +244,135 @@ export const deleteDailyVisit = async (req, res) => {
     res.status(500).json({ success: false, message: error?.message });
   }
 };
+
+
+
+
+export const getDoctorVisitReport = async (req, res) => {
+  try {
+    const {
+      month,
+      year,
+      doctorId,
+      pageNo = 1,
+      limit = 10,
+      minVisits,
+      maxVisits,
+    } = req.query;
+    const organizationId = req?.organization?.id;
+
+    const page = Math.max(1, parseInt(pageNo));
+    const perPage = Math.min(parseInt(limit) || 10, 50);
+    const skip = (page - 1) * perPage;
+
+    // Scope to this org's doctors only
+    const doctorMatchStage = {
+      organizationId: new mongoose.Types.ObjectId(organizationId),
+    };
+    if (doctorId) {
+      doctorMatchStage._id = new mongoose.Types.ObjectId(doctorId);
+    }
+
+    // Conditions applied inside the lookup pipeline (on DailyVisit docs)
+    const visitBaseMatch = {
+      organizationId: new mongoose.Types.ObjectId(organizationId),
+    };
+    if (year && month) {
+      visitBaseMatch.visitDate = {
+        $regex: `^${year}-${String(month).padStart(2, "0")}`,
+      };
+    } else if (year) {
+      visitBaseMatch.visitDate = { $regex: `^${year}-` };
+    }
+
+    const visitCountFilter = {};
+if (minVisits !== undefined && maxVisits !== undefined) {
+  visitCountFilter.$gte = parseInt(minVisits);
+  visitCountFilter.$lte = parseInt(maxVisits);
+} else if (minVisits !== undefined) {
+  visitCountFilter.$eq = parseInt(minVisits); 
+}
+
+const hasVisitCountFilter = Object.keys(visitCountFilter).length > 0;
+    const basePipeline = [
+      
+      {
+        $lookup: {
+          from: "dailyvisits",
+          let: { doctorId: "$_id" },
+          pipeline: [
+            { $match: visitBaseMatch },         
+            { $unwind: "$doctorId" },         
+            {
+              $match: {
+                $expr: { $eq: ["$$doctorId", "$doctorId"] }, 
+              },
+            },
+          ],
+          as: "visits",
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          doctorId: "$_id",
+          doctorName: "$name",
+          specialty: "$specialty",
+          totalVisits: { $size: "$visits" },
+          visitDates: {
+            $reduce: {
+              input: "$visits.visitDate",
+              initialValue: "",
+              in: {
+                $cond: [
+                  { $eq: ["$$value", ""] },
+                  "$$this",
+                  { $concat: ["$$value", ", ", "$$this"] },
+                ],
+              },
+            },
+          },
+        },
+      },
+      
+      ...(hasVisitCountFilter
+        ? [{ $match: { totalVisits: visitCountFilter } }]
+        : []),
+      { $sort: { totalVisits: -1, doctorName: 1 } }, 
+    ];
+
+    const [report, countResult] = await Promise.all([
+      mongoose.model("Doctor").aggregate([
+        { $match: doctorMatchStage },
+        ...basePipeline,
+        { $skip: skip },
+        { $limit: perPage },
+      ]),
+      mongoose.model("Doctor").aggregate([
+        { $match: doctorMatchStage },
+        ...basePipeline,
+        { $count: "total" },
+      ]),
+    ]);
+
+    const total = countResult[0]?.total || 0;
+
+    res.status(200).json({
+      success: true,
+      filters: { month, year, minVisits, maxVisits },
+      data: report,
+      pagination: {
+        total,
+        pageNo: page,
+        limit: perPage,
+        totalPages: Math.ceil(total / perPage),
+        hasNextPage: page < Math.ceil(total / perPage),
+        hasPrevPage: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Failed to get doctor visit report", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
