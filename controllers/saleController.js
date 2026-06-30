@@ -89,20 +89,27 @@ export const getSalesListOfEmployee = async (req, res) => {
       });
     }
 
-    const saleVisitWithFilter = await Sale.find(
-      {
-        saleBy: employeeId,
-        ...(fromDate && { createdAt: { $gte: from } }),
-        ...(toDate && { createdAt: { $lte: to } }),
-      },
-      {
-        _id: 1,
-        stockist: 1,
-        month: 1,
-        saleAmount: 1,
-        createdAt: 1,
-      },
-    )
+    const filter = { saleBy: employeeId };
+
+    if (fromDate || toDate) {
+      filter.createdAt = {};
+
+      if (fromDate) {
+        filter.createdAt.$gte = from;
+      }
+
+      if (toDate) {
+        filter.createdAt.$lte = to;
+      }
+    }
+
+    const saleVisitWithFilter = await Sale.find(filter, {
+      _id: 1,
+      stockist: 1,
+      month: 1,
+      saleAmount: 1,
+      createdAt: 1,
+    })
       .populate("stockist", "_id name")
       .sort({ _id: -1 })
       .skip(rowsPerPage * (pageNumber - 1))
@@ -127,7 +134,7 @@ export const getSalesListOfEmployee = async (req, res) => {
 
 export const getAllSales = async (req, res) => {
   try {
-    let { employeeId, months,years, pageNo = 1, limit = 10 } = req?.body;
+    let { employeeId, months, years, pageNo = 1, limit = 10 } = req?.body;
 
     pageNo = Number(req.body.pageNo) || 1;
     limit = Number(req.body.limit) || 5;
@@ -145,23 +152,21 @@ export const getAllSales = async (req, res) => {
       organizationId: req?.organization?.id,
       ...(employeeId && { employeeId: employeeId }),
       ...(months && months.length > 0 && { month: { $in: months } }),
-      
     };
 
     if (years?.length > 0) {
-  const yearConditions = years.map((year) => {
-    const start = new Date(`${year}-01-01T00:00:00.000Z`);
-    const end = new Date(`${year}-12-31T23:59:59.999Z`);
-    return { createdAt: { $gte: start, $lte: end } };
-  });
+      const yearConditions = years.map((year) => {
+        const start = new Date(`${year}-01-01T00:00:00.000Z`);
+        const end = new Date(`${year}-12-31T23:59:59.999Z`);
+        return { createdAt: { $gte: start, $lte: end } };
+      });
 
-
-  if (yearConditions.length === 1) {
-    filter.createdAt = yearConditions[0].createdAt;
-  } else {
-    filter.$or = yearConditions;
-  }
-}
+      if (yearConditions.length === 1) {
+        filter.createdAt = yearConditions[0].createdAt;
+      } else {
+        filter.$or = yearConditions;
+      }
+    }
 
     const [sales, totalSalesCount] = await Promise.all([
       Sale.find(
@@ -202,10 +207,10 @@ export const updateSale = async (req, res) => {
     const updatedSale = await Sale.findOneAndUpdate(
       {
         _id: id,
-        organizationId: req?.organization?.id, 
+        organizationId: req?.organization?.id,
       },
       req.body,
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     )
       .populate("saleBy", "_id firstName lastName role")
       .populate("stockist", "_id name");
@@ -230,7 +235,7 @@ export const deleteSale = async (req, res) => {
 
     const deleted = await Sale.findOneAndDelete({
       _id: id,
-      organizationId: req?.organization?.id, 
+      organizationId: req?.organization?.id,
     });
 
     if (!deleted) {
