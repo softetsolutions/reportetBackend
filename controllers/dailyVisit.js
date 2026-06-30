@@ -65,25 +65,31 @@ export const getDailyVisitList = async (req, res) => {
     const fromDate = toISTDateString(from);
     const toDate = toISTDateString(to);
 
-    const dailyVisitWithFilter = await DailyVisit.find(
-      {
-        employeeId,
-        ...(fromDate && { visitDate: { $gte: fromDate } }),
-        ...(toDate && { visitDate: { $lte: toDate } }),
-      },
-      {
-        _id: 1,
-        date: 1,
-        remark: 1,
-        doctorId: 1,
-        assistedBy: 1,
-        createdAt: 1,
-        visitDate: 1,
-      },
-    )
+    const filter = { employeeId: employeeId };
+    if (from || to) {
+      filter.visitDate = {};
+      if (from) {
+        let fromDate = from.split("T")[0];
+        filter.visitDate.$gte = fromDate;
+      }
+      if (to) {
+        let toDate = to.split("T")[0];
+        filter.visitDate.$lte = toDate;
+      }
+    }
+
+    const dailyVisitWithFilter = await DailyVisit.find(filter, {
+      _id: 1,
+      date: 1,
+      remark: 1,
+      doctorId: 1,
+      assistedBy: 1,
+      createdAt: 1,
+      visitDate: 1,
+    })
       .populate("doctorId", "_id name specialty")
       .populate("areaId", "name _id")
-      .sort({ _id: 1 })
+      .sort({ _id: -1 })
       .skip(rowsPerPage * (pageNumber - 1))
       .limit(limit + 1)
       .lean();
@@ -113,9 +119,16 @@ export const getOrganizationDailyVisitList = async (req, res) => {
     const filter = {
       organizationId: req?.organization?.id,
       ...(employeeId && { employeeId: employeeId }),
-      ...(dateFrom && { visitDate: { $gte: dateFrom } }),
-      ...(dateTo && { visitDate: { $lte: dateTo } }),
     };
+    if (dateFrom || dateTo) {
+      filter.visitDate = {};
+      if (dateFrom) {
+        filter.visitDate.$gte = dateFrom;
+      }
+      if (dateTo) {
+        filter.visitDate.$lte = dateTo;
+      }
+    }
 
     const [dailyVistList, dailyVistListCount] = await Promise.all([
       DailyVisit.find(
@@ -187,7 +200,6 @@ export const getDailyVisitInfo = async (req, res) => {
   }
 };
 
-
 // UPDATE a daily visit (orgAuth only)
 export const updateDailyVisit = async (req, res) => {
   try {
@@ -199,7 +211,7 @@ export const updateDailyVisit = async (req, res) => {
         organizationId: req?.organization?.id, // scope to org for safety
       },
       req.body,
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     )
       .populate("employeeId", "_id firstName lastName role")
       .populate("doctorId", "_id name")
