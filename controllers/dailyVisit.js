@@ -258,6 +258,7 @@ export const getDoctorVisitReport = async (req, res) => {
       limit = 10,
       minVisits,
       maxVisits,
+      headQuarterId,
     } = req.query;
     const organizationId = req?.organization?.id;
 
@@ -290,11 +291,22 @@ if (minVisits !== undefined && maxVisits !== undefined) {
   visitCountFilter.$gte = parseInt(minVisits);
   visitCountFilter.$lte = parseInt(maxVisits);
 } else if (minVisits !== undefined) {
-  visitCountFilter.$eq = parseInt(minVisits); 
+  if (parseInt(minVisits) >= 3) {
+    visitCountFilter.$gte = 3;  
+  } else {
+    visitCountFilter.$eq = parseInt(minVisits);
+  }
 }
 
 const hasVisitCountFilter = Object.keys(visitCountFilter).length > 0;
     const basePipeline = [
+
+        { $lookup: { from: "areas", localField: "areaId", foreignField: "_id", as: "area" } },
+{ $unwind: { path: "$area", preserveNullAndEmptyArrays: true } },
+{ $lookup: { from: "headquarters", localField: "area.headQuarterId", foreignField: "_id", as: "headquarter" } },
+{ $unwind: { path: "$headquarter", preserveNullAndEmptyArrays: true } },
+...(headQuarterId ? [{ $match: { "area.headQuarterId": new mongoose.Types.ObjectId(headQuarterId) } }] : []),
+      
       
       {
         $lookup: {
@@ -312,6 +324,7 @@ const hasVisitCountFilter = Object.keys(visitCountFilter).length > 0;
           as: "visits",
         },
       },
+    
       {
         $project: {
           _id: 0,
@@ -319,6 +332,7 @@ const hasVisitCountFilter = Object.keys(visitCountFilter).length > 0;
           doctorName: "$name",
           specialty: "$specialty",
           totalVisits: { $size: "$visits" },
+          headQuarterName: "$headquarter.headQuarterName",
           visitDates: {
             $reduce: {
               input: "$visits.visitDate",
@@ -341,25 +355,36 @@ const hasVisitCountFilter = Object.keys(visitCountFilter).length > 0;
       { $sort: { totalVisits: -1, doctorName: 1 } }, 
     ];
 
-    const [report, countResult] = await Promise.all([
+    const [report, countResult,headquarters,maxVisitsResult] = await Promise.all([
       mongoose.model("Doctor").aggregate([
         { $match: doctorMatchStage },
         ...basePipeline,
         { $skip: skip },
         { $limit: perPage },
+        
       ]),
       mongoose.model("Doctor").aggregate([
         { $match: doctorMatchStage },
         ...basePipeline,
         { $count: "total" },
       ]),
-    ]);
+      mongoose.model("Headquarter").find({ organizationId: new mongoose.Types.ObjectId(organizationId) }, { _id: 1, headQuarterName: 1 }).lean(),
+       mongoose.model("Doctor").aggregate([
+    { $match: doctorMatchStage },
+    ...basePipeline,
+    { $group: { _id: null, max: { $max: "$totalVisits" } } },
+  ]),
+    ])
+
+    const maxTotalVisits = maxVisitsResult[0]?.max || 0;
 
     const total = countResult[0]?.total || 0;
 
     res.status(200).json({
       success: true,
-      filters: { month, year, minVisits, maxVisits },
+      maxTotalVisits,
+      filters: { month, year, minVisits, maxVisits,headquarters},
+      headquarters,
       data: report,
       pagination: {
         total,

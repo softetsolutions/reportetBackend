@@ -76,7 +76,7 @@ export const getAllDoctors = async (req, res) => {
   try {
     const pageNo = Number(req.body.pageNo) || 1;
     const limit = Number(req.body.limit) || 5;
-    const {name,specialty}=req.body
+    const {name,specialty,areaId, headQuarterId}=req.body
 
     const filter = {
       organizationId: req?.organization?.id,
@@ -87,6 +87,17 @@ if (name?.trim()) {
     if (specialty?.trim()) {
       filter.specialty = { $regex: specialty.trim(), $options: "i" };
     }
+
+    if (areaId) {
+  filter.areaId = areaId;
+} else if (headQuarterId) {
+  
+  const areas = await Area.find(
+    { headQuarterId, organizationId: req?.organization?.id },
+    { _id: 1 }
+  ).lean();
+  filter.areaId = { $in: areas.map((a) => a._id) };
+}
     const [doctors, totalDoctorCount] = await Promise.all([
       Doctor.find(
         filter,
@@ -100,7 +111,13 @@ if (name?.trim()) {
           skip: (pageNo - 1) * limit,
           limit,
         },
-      ),
+      )
+      .populate({
+      path: "areaId",
+      select: "name headQuarterId",
+      populate: { path: "headQuarterId", select: "headQuarterName" },
+    }),
+       
       Doctor.countDocuments(filter),
     ]);
 

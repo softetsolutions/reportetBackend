@@ -305,23 +305,28 @@ export const editArea = async (req, res) => {
 export const deleteArea = async (req, res) => {
   try {
     const { areaId } = req.params;
+    const { force } = req.query;
 
-
+console.log("force param:", req.query.force, typeof req.query.force);
     const linkedDoctorCount = await Doctor.countDocuments({ areaId });
 
-    if (linkedDoctorCount > 0) {
+    if (linkedDoctorCount > 0&& force !== "true") {
       return res.status(409).json({
         success: false,
         hasLinkedDoctors: true,
         doctorCount: linkedDoctorCount,
-        message: `This area has ${linkedDoctorCount} doctor(s) assigned to it. Please delete or move them to another area before deleting this area.`,
+        message: `This area has ${linkedDoctorCount} doctor(s) assigned to it.`,
       });
+    }
+    if (linkedDoctorCount > 0 && force === "true") {
+      await Doctor.deleteMany({ areaId });
     }
 
     const deleted = await Area.findOneAndDelete({
       _id: areaId,
       organizationId: req?.organization?._id,
     });
+    console.log("force param:", req.query.force, typeof req.query.force);
 
     if (!deleted) {
       return res.status(404).json({
