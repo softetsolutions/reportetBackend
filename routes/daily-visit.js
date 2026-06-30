@@ -20,9 +20,9 @@ router.post(
   orgAuth,
   getOrganizationDailyVisitList,
 );
-router.get("/getDoctorVisitReport", orgAuth, getDoctorVisitReport);
+router.get("/getDoctorVisitReport",authOrOrg, getDoctorVisitReport);
 router.put("/:id", orgAuth, updateDailyVisit);      
-router.delete("/:id", orgAuth, deleteDailyVisit);
+router.delete("/:id",orgAuth, deleteDailyVisit);
 
 
 export default router;
