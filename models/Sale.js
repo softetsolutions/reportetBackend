@@ -4,9 +4,10 @@ const saleSchema = new mongoose.Schema(
   {
     saleBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Employee",
+      refPath: "saleByModel",
       required: true,
     },
+   
     stockist: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Stockist",
@@ -40,6 +41,13 @@ const saleSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+
+saleSchema.virtual("saleByModel").get(function () {
+  return String(this.saleBy) === String(this.organizationId)
+    ? "Organization"
+    : "Employee";
+});
 
 saleSchema.index(
   { organizationId: 1, saleBy: 1, month: 1, year: 1, stockist: 1 },
