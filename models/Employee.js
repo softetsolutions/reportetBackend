@@ -23,15 +23,15 @@ const employeeSchema = new mongoose.Schema(
       ref: "Organization",
       required: true,
     },
-    assignedAreas: [{ type: mongoose.Schema.Types.ObjectId, ref: "Area" }],
-    assignedDoctors: [{ type: mongoose.Schema.Types.ObjectId, ref: "Doctor" }],
+    // assignedAreas: [{ type: mongoose.Schema.Types.ObjectId, ref: "Area" }],
+    // assignedDoctors: [{ type: mongoose.Schema.Types.ObjectId, ref: "Doctor" }],
     assignedHeadQuarters: [
       { type: mongoose.Schema.Types.ObjectId, ref: "Headquarter" },
     ],
     isActive: { type: Boolean, default: true },
     deactivatedAt: { type: Date, default: null },
     resetPasswordToken: { type: String, default: null },
-resetPasswordExpires: { type: Date, default: null },
+    resetPasswordExpires: { type: Date, default: null },
   },
   { timestamps: true },
 );

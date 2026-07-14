@@ -34,4 +34,6 @@ dailyVisit.index(
   { unique: true },
 );
 
+dailyVisit.index({ visitDate: -1 });
+
 export default mongoose.model("DailyVisit", dailyVisit);
