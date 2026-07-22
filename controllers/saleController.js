@@ -139,18 +139,9 @@ export const getAllSales = async (req, res) => {
     pageNo = Number(req.body.pageNo) || 1;
     limit = Number(req.body.limit) || 5;
 
-    // if (dateFrom && dateTo) {
-    //   dateFrom = dayjs
-    //     .tz(dateFrom, "Asia/Kolkata")
-    //     .startOf("day")
-    //     .utc()
-    //     .toDate();
-    //   dateTo = dayjs.tz(dateTo, "Asia/Kolkata").endOf("day").utc().toDate();
-    // }
-
     const filter = {
       organizationId: req?.organization?.id,
-      ...(employeeId && { employeeId: employeeId }),
+      ...(employeeId && { saleBy: employeeId }),
       ...(months && months.length > 0 && { month: { $in: months } }),
     };
 

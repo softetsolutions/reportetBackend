@@ -2,10 +2,10 @@ import mongoose from "mongoose";
 import HeadQuarter from "../models/HeadQuarter.js";
 import Employee from "../models/Employee.js";
 //import {brevo} from "../config/mailer.js";
-import {sendMail,sendForgotPasswordMail} from "../config/mailer.js";
+import { sendMail, sendForgotPasswordMail } from "../config/mailer.js";
 
 import Area from "../models/Area.js";
-import crypto from 'crypto'
+import crypto from "crypto";
 import Doctor from "../models/Doctor.js";
 export const onboardEmployee = async (req, res) => {
   try {
@@ -89,38 +89,33 @@ export const paginatedEmployeeList = async (req, res) => {
     let { pageNo = 1, limit = 5 } = req.body;
     const { name, fromDate, toDate } = req.body;
     const filter = { organizationId: req?.organization?.id };
-    
 
-   if (name?.trim()) {
-  const parts = name.trim().split(/\s+/);
-   if (parts.length === 1) {
-    
-    filter.$or = [
-      { firstName: { $regex: parts[0], $options: "i" } },
-      { lastName: { $regex: parts[0], $options: "i" } },
-    ];
-  } else {
-    
-    const first = parts[0];
-    const last = parts.slice(1).join(" ");
-    filter.$and = [
-      { firstName: { $regex: first, $options: "i" } },
-      { lastName: { $regex: last, $options: "i" } },
-    ];
-  }
-}
+    if (name?.trim()) {
+      const parts = name.trim().split(/\s+/);
+      if (parts.length === 1) {
+        filter.$or = [
+          { firstName: { $regex: parts[0], $options: "i" } },
+          { lastName: { $regex: parts[0], $options: "i" } },
+        ];
+      } else {
+        const first = parts[0];
+        const last = parts.slice(1).join(" ");
+        filter.$and = [
+          { firstName: { $regex: first, $options: "i" } },
+          { lastName: { $regex: last, $options: "i" } },
+        ];
+      }
+    }
 
-    
     if (fromDate || toDate) {
       filter.createdAt = {};
       if (fromDate) filter.createdAt.$gte = new Date(fromDate);
       if (toDate) {
         const end = new Date(toDate);
-        end.setHours(23, 59, 59, 999); 
+        end.setHours(23, 59, 59, 999);
         filter.createdAt.$lte = end;
       }
     }
-
 
     const [employee, totalEmployeeCount] = await Promise.all([
       Employee.find(
@@ -407,7 +402,6 @@ export const getAssignedDoctorAndArea = async (req, res) => {
   }
 };
 
-
 export const forgotPassword = async (req, res) => {
   try {
     const { userName } = req.body;
@@ -421,46 +415,45 @@ export const forgotPassword = async (req, res) => {
 
     const employee = await Employee.findOne({ userName: userName.trim() });
 
-    
     if (!employee) {
       return res.status(200).json({
         success: true,
-        message: "If this username exists, a reset link has been sent to the registered email.",
+        message:
+          "If this username exists, a reset link has been sent to the registered email.",
       });
     }
 
     if (!employee.isActive) {
       return res.status(403).json({
         success: false,
-        message: "Your account is deactivated. Please contact your administrator.",
+        message:
+          "Your account is deactivated. Please contact your administrator.",
       });
     }
 
-    
     const rawToken = crypto.randomBytes(32).toString("hex");
-    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(rawToken)
+      .digest("hex");
 
-    
     employee.resetPasswordToken = hashedToken;
-    employee.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); 
+    employee.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
     await employee.save({ validateBeforeSave: false });
 
-    
     const resetUrl = `${process.env.FRONTEND_URL}/reportet/employee/reset-password/${rawToken}`;
 
     try {
       // await sendMail(
-      //   "passwordReset",           
+      //   "passwordReset",
       //   resetUrl,
       //   null,
       //   [{ email: employee.email, name: employee.displayName }],
       // );
-      await sendForgotPasswordMail(
-  resetUrl,
-  [{ email: employee.email, name: employee.displayName }]
-);
+      await sendForgotPasswordMail(resetUrl, [
+        { email: employee.email, name: employee.displayName },
+      ]);
     } catch (mailError) {
-      
       employee.resetPasswordToken = null;
       employee.resetPasswordExpires = null;
       await employee.save({ validateBeforeSave: false });
@@ -474,7 +467,8 @@ export const forgotPassword = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "If this username exists, a reset link has been sent to the registered email.",
+      message:
+        "If this username exists, a reset link has been sent to the registered email.",
     });
   } catch (error) {
     console.error("Forgot password error:", error);
@@ -511,30 +505,30 @@ export const resetPassword = async (req, res) => {
       });
     }
 
-    
     const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
     const employee = await Employee.findOne({
       resetPasswordToken: hashedToken,
-      resetPasswordExpires: { $gt: new Date() }, 
+      resetPasswordExpires: { $gt: new Date() },
     });
 
     if (!employee) {
       return res.status(400).json({
         success: false,
-        message: "Reset link is invalid or has expired. Please request a new one.",
+        message:
+          "Reset link is invalid or has expired. Please request a new one.",
       });
     }
 
-    
     employee.password = newPassword;
     employee.resetPasswordToken = null;
     employee.resetPasswordExpires = null;
-    await employee.save(); 
+    await employee.save();
 
     res.status(200).json({
       success: true,
-      message: "Password reset successful. You can now log in with your new password.",
+      message:
+        "Password reset successful. You can now log in with your new password.",
     });
   } catch (error) {
     console.error("Reset password error:", error);

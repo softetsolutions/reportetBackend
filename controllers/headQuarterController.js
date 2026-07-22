@@ -48,14 +48,17 @@ export const fetchHeadquarterData = async (req, res) => {
     let { pageNo = 1, limit = 5 } = req.body;
     limit = Number(limit);
 
-     const { headQuarterName, location } = req.body;
+    const { headQuarterName, location } = req.body;
 
     const matchFilter = {
       organizationId: new Types.ObjectId(req?.organization?.id),
     };
 
     if (headQuarterName?.trim()) {
-      matchFilter.headQuarterName = { $regex: headQuarterName.trim(), $options: "i" };
+      matchFilter.headQuarterName = {
+        $regex: headQuarterName.trim(),
+        $options: "i",
+      };
     }
     if (location?.trim()) {
       matchFilter.location = { $regex: location.trim(), $options: "i" };
@@ -66,9 +69,7 @@ export const fetchHeadquarterData = async (req, res) => {
         $facet: {
           headQuarterDetail: [
             {
-              $match: 
-                matchFilter,
-              
+              $match: matchFilter,
             },
             {
               $sort: {
@@ -128,9 +129,7 @@ export const fetchHeadquarterData = async (req, res) => {
 
           totalCount: [
             {
-              $match: 
-                 matchFilter
-              
+              $match: matchFilter,
             },
             {
               $count: "totalHeadquarters",
@@ -243,8 +242,6 @@ export const getEmployeeHeadQuarter = async (req, res) => {
   }
 };
 
-
-
 export const editHeadquarter = async (req, res) => {
   try {
     const { headquarterId } = req.params;
@@ -268,11 +265,10 @@ export const editHeadquarter = async (req, res) => {
     if (headQuarterName) updateFields.headQuarterName = headQuarterName;
     if (location) updateFields.location = location;
 
-    
     const updated = await HeadQuarter.findOneAndUpdate(
       {
         _id: headquarterId,
-        organizationId: req?.organization?.id, 
+        organizationId: req?.organization?.id,
       },
       { $set: updateFields },
       { new: true, runValidators: true },
@@ -291,11 +287,11 @@ export const editHeadquarter = async (req, res) => {
       data: updated,
     });
   } catch (error) {
-   
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "A headquarter with this name already exists in your organization",
+        message:
+          "A headquarter with this name already exists in your organization",
       });
     }
     console.error("Error updating headquarter:", error.message);
@@ -317,16 +313,14 @@ export const deleteHeadquarter = async (req, res) => {
       });
     }
 
-    
     const linkedAreaCount = await Area.countDocuments({
       headQuarterId: headquarterId,
     });
 
     if (linkedAreaCount > 0) {
-      
       const linkedAreas = await Area.find(
         { headQuarterId: headquarterId },
-        { _id: 1 }
+        { _id: 1 },
       );
       const areaIds = linkedAreas.map((a) => a._id);
       const linkedDoctorCount = await Doctor.countDocuments({
@@ -342,7 +336,6 @@ export const deleteHeadquarter = async (req, res) => {
       });
     }
 
-    
     const deleted = await HeadQuarter.findOneAndDelete({
       _id: headquarterId,
       organizationId: req?.organization?.id,
