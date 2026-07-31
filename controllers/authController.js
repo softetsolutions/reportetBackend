@@ -3,9 +3,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 
 const generateToken = (id, role, assignedHeadQuarter) =>
-  jwt.sign({ id, role, assignedHeadQuarter }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
+  jwt.sign({ id, role, assignedHeadQuarter }, process.env.JWT_SECRET);
 
 export const login = async (req, res) => {
   try {
