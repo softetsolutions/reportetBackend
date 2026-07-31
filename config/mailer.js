@@ -8,13 +8,7 @@ const brevo = new BrevoClient({
   maxRetries: 3,
 });
 
-// The payload example of sendmail payload
-// subject: 'Hello from Brevo!',
-// htmlContent: '<html><body><p>Hello,</p><p>This is my first transactional email.</p></body></html>',
-// sender: { name: 'Alex from Brevo', email: 'hello@brevo.com' },
-// to: [{ email: 'johndoe@example.com', name: 'John Doe' }],
-
-export  async function sendMail(subject, userName, password, to) {
+export async function sendMail(subject, userName, password, to) {
   try {
     await brevo.transactionalEmails.sendTransacEmail({
       subject: subject,
@@ -122,9 +116,7 @@ export  async function sendMail(subject, userName, password, to) {
   }
 }
 
-
-
-export  async function sendForgotPasswordMail(resetUrl, to) {
+export async function sendForgotPasswordMail(resetUrl, to) {
   try {
     await brevo.transactionalEmails.sendTransacEmail({
       subject: "Reset Your Reportet Account Password",
@@ -240,5 +232,3 @@ Thank you,<br>
     throw err;
   }
 }
-
-
