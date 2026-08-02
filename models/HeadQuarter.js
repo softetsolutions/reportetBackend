@@ -7,7 +7,7 @@ const headQuarterSchema = new mongoose.Schema(
     zone: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Zone",
-      required: true,
+      //required: true,
     },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
