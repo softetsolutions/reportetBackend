@@ -3,13 +3,17 @@ import HeadQuarter from "../models/HeadQuarter.js";
 import Area from "../models/Area.js";
 import Doctor from "../models/Doctor.js";
 import Employee from "../models/Employee.js";
+import fs from "fs";
+import ExcelJS from "exceljs";
+import { getCellStringValue } from "../utils/helperFunction.js";
+import Zone from "../models/Zone.js";
 
 export const addHeadquarter = async (req, res) => {
   const session = await mongoose.startSession();
   try {
     const { hierrarchy } = req.body;
     if (!hierrarchy?.headquarters?.length) {
-      res.json({
+      return res.json({
         success: false,
         message: "Empty headquarter",
       });
@@ -18,13 +22,44 @@ export const addHeadquarter = async (req, res) => {
     const result = await session.withTransaction(async () => {
       const headquarters = await HeadQuarter.insertMany(
         hierrarchy.headquarters,
+        { session },
       );
+
+      const locations = [
+        ...new Set(
+          hierrarchy.headquarters
+            .map((hq) => hq.location?.trim())
+            .filter(Boolean),
+        ),
+      ];
+
+      if (locations.length) {
+        const organizationId = hierrarchy.headquarters[0].organizationId;
+
+        const existingZones = await Zone.find({
+          organizationId,
+          name: { $in: locations },
+        }).session(session);
+
+        const existingZoneNames = new Set(existingZones.map((z) => z.name));
+
+        const newZones = locations
+          .filter((loc) => !existingZoneNames.has(loc))
+          .map((name) => ({ name, organizationId }));
+
+        if (newZones.length) {
+          await Zone.insertMany(newZones, { session });
+        }
+      }
+
       const areas = hierrarchy?.areas?.length
-        ? await Area.insertMany(hierrarchy?.areas)
+        ? await Area.insertMany(hierrarchy.areas, { session })
         : [];
       const doctor = hierrarchy?.doctors?.length
-        ? await Doctor.insertMany(hierrarchy?.doctors)
+        ? await Doctor.insertMany(hierrarchy.doctors, { session })
         : [];
+
+      return { headquarters, areas, doctor };
     });
 
     res.json({
@@ -358,5 +393,333 @@ export const deleteHeadquarter = async (req, res) => {
       success: false,
       message: "Could not delete headquarter, try again later",
     });
+  }
+};
+
+export const importHeadquartersFromExcel = async (req, res) => {
+  const session = await mongoose.startSession();
+  const filePath = req.file?.path;
+  try {
+    const { sheetNo = 0, rowNumber = 2, toRow } = req?.body;
+    const organizationId = req?.organization?._id;
+    const endRow = toRow ? Number(toRow) : Infinity;
+
+    const escapeRegex = (value) =>
+      String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+
+    const worksheet = workbook.worksheets[sheetNo];
+    if (!worksheet) {
+      //fs.unlinkSync(filePath);
+      return res.status(400).json({
+        success: false,
+        message: "Invalid sheet number",
+      });
+    }
+
+    const hqMap = {};
+
+    const seenDoctorKeys = new Map();
+    const skippedRows = [];
+    const fileDuplicateDoctors = [];
+
+    const buildDoctorKey = (email, phoneNumber, name) => {
+      if (email) return `email::${email.trim().toLowerCase()}`;
+      if (phoneNumber) return `phone::${String(phoneNumber).trim()}`;
+
+      return `name::${name.trim().toLowerCase()}`;
+    };
+
+    worksheet.eachRow({ includeEmpty: false }, (row, number) => {
+      if (number < rowNumber || number > endRow) return;
+
+      const hqNameRaw = getCellStringValue(row?.values[2]);
+      const location = getCellStringValue(row?.values[3]);
+      const areaNameRaw = getCellStringValue(row?.values[4]);
+      const doctorName = getCellStringValue(row?.values[5]);
+      const specialty = getCellStringValue(row?.values[6]);
+      const dob = getCellStringValue(row?.values[7]) || undefined;
+      const email = getCellStringValue(row?.values[8]) || undefined;
+      const phoneNumber = getCellStringValue(row?.values[9]) || undefined;
+
+      if (!hqNameRaw) {
+        skippedRows.push({ row: number, reason: "Missing headquarter name" });
+        return;
+      }
+
+      const hqKey = hqNameRaw.trim().toUpperCase();
+      if (!hqMap[hqKey]) {
+        hqMap[hqKey] = { name: hqNameRaw.trim(), location, areas: {} };
+      }
+
+      if (areaNameRaw) {
+        const areaKey = areaNameRaw.trim().toUpperCase();
+        if (!hqMap[hqKey].areas[areaKey]) {
+          hqMap[hqKey].areas[areaKey] = {
+            name: areaNameRaw.trim(),
+            doctors: [],
+          };
+        }
+
+        if (doctorName) {
+          const doctorKey = buildDoctorKey(email, phoneNumber, doctorName);
+          const compositeKey = `${hqKey}::${areaKey}::${doctorKey}`;
+
+          if (seenDoctorKeys.has(compositeKey)) {
+            const first = seenDoctorKeys.get(compositeKey);
+            fileDuplicateDoctors.push({
+              row: number,
+              name: doctorName,
+              headquarter: hqMap[hqKey].name,
+              area: hqMap[hqKey].areas[areaKey].name,
+              reason: `Duplicate of row ${first.row} in this file (same ${doctorKey.split("::")[0]})`,
+            });
+            return;
+          }
+
+          seenDoctorKeys.set(compositeKey, { row: number });
+          hqMap[hqKey].areas[areaKey].doctors.push({
+            name: doctorName,
+            specialty,
+            dob,
+            email,
+            phoneNumber,
+            _row: number,
+            _doctorKey: doctorKey,
+          });
+        }
+      }
+    });
+
+    //fs.unlinkSync(filePath);
+
+    if (!Object.keys(hqMap).length) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid headquarter rows found in the sheet",
+      });
+    }
+
+    let insertedHQCount = 0;
+    let insertedAreaCount = 0;
+    let insertedDoctorCount = 0;
+
+    const existingHeadquarters = [];
+    const existingAreas = [];
+    const dbDuplicateDoctors = [];
+
+    await session.withTransaction(async () => {
+      const hqKeys = Object.keys(hqMap);
+      const hqNames = hqKeys.map((k) => hqMap[k].name);
+
+      const existingHQs = await HeadQuarter.find({
+        organizationId,
+        $or: hqNames.map((name) => ({
+          headQuarterName: {
+            $regex: new RegExp(`^${escapeRegex(name)}$`, "i"),
+          },
+        })),
+      }).session(session);
+
+      const hqNameToId = {};
+      existingHQs.forEach((hq) => {
+        hqNameToId[hq.headQuarterName.toUpperCase()] = hq._id;
+        existingHeadquarters.push({ name: hq.headQuarterName });
+      });
+
+      const newHQs = hqKeys
+        .filter((key) => !hqNameToId[key])
+        .map((key) => ({
+          headQuarterName: hqMap[key].name,
+          location: hqMap[key].location,
+          organizationId,
+        }));
+
+      if (newHQs.length) {
+        const inserted = await HeadQuarter.insertMany(newHQs, { session });
+        insertedHQCount = inserted.length;
+        inserted.forEach((hq) => {
+          hqNameToId[hq.headQuarterName.toUpperCase()] = hq._id;
+        });
+
+        const locations = [
+          ...new Set(newHQs.map((hq) => hq.location?.trim()).filter(Boolean)),
+        ];
+
+        if (locations.length) {
+          const existingZones = await Zone.find({
+            organizationId,
+            name: { $in: locations },
+          }).session(session);
+
+          const existingZoneNames = new Set(existingZones.map((z) => z.name));
+
+          const newZones = locations
+            .filter((loc) => !existingZoneNames.has(loc))
+            .map((name) => ({ name, organizationId }));
+
+          if (newZones.length) {
+            await Zone.insertMany(newZones, { session });
+          }
+        }
+      }
+
+      const areaKeyToId = {};
+      const areasToInsert = [];
+
+      for (const hqKey of hqKeys) {
+        const hqId = hqNameToId[hqKey];
+        const areaKeys = Object.keys(hqMap[hqKey].areas);
+        if (!areaKeys.length) continue;
+
+        const areaNames = areaKeys.map((k) => hqMap[hqKey].areas[k].name);
+
+        const existingAreasForHQ = await Area.find({
+          organizationId,
+          headQuarterId: hqId,
+          $or: areaNames.map((name) => ({
+            name: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") },
+          })),
+        }).session(session);
+
+        existingAreasForHQ.forEach((area) => {
+          areaKeyToId[`${hqId}::${area.name.toUpperCase()}`] = area._id;
+          existingAreas.push({
+            name: area.name,
+            headquarter: hqMap[hqKey].name,
+          });
+        });
+
+        areaKeys.forEach((areaKey) => {
+          if (!areaKeyToId[`${hqId}::${areaKey}`]) {
+            areasToInsert.push({
+              name: hqMap[hqKey].areas[areaKey].name,
+              headQuarterId: hqId,
+              organizationId,
+              _tmpKey: `${hqId}::${areaKey}`,
+            });
+          }
+        });
+      }
+
+      if (areasToInsert.length) {
+        const toInsert = areasToInsert.map(({ _tmpKey, ...rest }) => rest);
+        const inserted = await Area.insertMany(toInsert, { session });
+        insertedAreaCount = inserted.length;
+        inserted.forEach((area, idx) => {
+          areaKeyToId[areasToInsert[idx]._tmpKey] = area._id;
+        });
+      }
+
+      const allDoctors = [];
+      for (const hqKey of hqKeys) {
+        const hqId = hqNameToId[hqKey];
+        for (const areaKey of Object.keys(hqMap[hqKey].areas)) {
+          const areaId = areaKeyToId[`${hqId}::${areaKey}`];
+          const areaEntry = hqMap[hqKey].areas[areaKey];
+          areaEntry.doctors.forEach((doc) => {
+            allDoctors.push({
+              ...doc,
+              areaId,
+              headquarter: hqMap[hqKey].name,
+              area: areaEntry.name,
+            });
+          });
+        }
+      }
+
+      const emails = allDoctors.filter((d) => d.email).map((d) => d.email);
+      const phones = allDoctors
+        .filter((d) => d.phoneNumber)
+        .map((d) => d.phoneNumber);
+
+      const orClauses = [];
+      if (emails.length) orClauses.push({ email: { $in: emails } });
+      if (phones.length) orClauses.push({ phoneNumber: { $in: phones } });
+
+      const existingDoctors = orClauses.length
+        ? await Doctor.find({ organizationId, $or: orClauses }).session(session)
+        : [];
+
+      const existingDoctorKeys = new Set();
+      existingDoctors.forEach((doc) => {
+        if (doc.email)
+          existingDoctorKeys.add(`email::${doc.email.trim().toLowerCase()}`);
+        if (doc.phoneNumber)
+          existingDoctorKeys.add(`phone::${String(doc.phoneNumber).trim()}`);
+      });
+
+      const doctorsToInsert = [];
+      allDoctors.forEach((doc) => {
+        if (existingDoctorKeys.has(doc._doctorKey)) {
+          dbDuplicateDoctors.push({
+            row: doc._row,
+            name: doc.name,
+            headquarter: doc.headquarter,
+            area: doc.area,
+            reason:
+              "A doctor with this email/phone number already exists in this organization",
+          });
+          return;
+        }
+        const { _row, _doctorKey, headquarter, area, ...toInsert } = doc;
+        doctorsToInsert.push(toInsert);
+      });
+
+      if (doctorsToInsert.length) {
+        try {
+          const inserted = await Doctor.insertMany(doctorsToInsert, {
+            session,
+            ordered: false,
+          });
+          insertedDoctorCount = inserted.length;
+        } catch (error) {
+          insertedDoctorCount = error.result?.nInserted || 0;
+        }
+      }
+    });
+
+    const totalDuplicateDoctors =
+      fileDuplicateDoctors.length + dbDuplicateDoctors.length;
+
+    res.status(200).json({
+      success: true,
+      message: `${insertedHQCount} headquarter(s), ${insertedAreaCount} area(s), ${insertedDoctorCount} doctor(s) imported successfully.${
+        totalDuplicateDoctors
+          ? ` ${totalDuplicateDoctors} duplicate doctor row(s) were skipped.`
+          : ""
+      }`,
+      summary: {
+        insertedHQCount,
+        insertedAreaCount,
+        insertedDoctorCount,
+        skippedDoctorCount: totalDuplicateDoctors,
+        skippedRowCount: skippedRows.length,
+      },
+      duplicates: {
+        doctors: [...fileDuplicateDoctors, ...dbDuplicateDoctors],
+      },
+      existing: {
+        headquarters: existingHeadquarters,
+        areas: existingAreas,
+      },
+      skippedRows,
+    });
+  } catch (err) {
+    console.error("Headquarter Import Error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to import headquarters from Excel file.",
+    });
+  } finally {
+    await session.endSession();
+    if (filePath) {
+      fs.unlink(filePath, (unlinkErr) => {
+        if (unlinkErr)
+          console.error("Failed to delete uploaded file:", unlinkErr.message);
+      });
+    }
   }
 };

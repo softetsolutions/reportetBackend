@@ -1,4 +1,5 @@
 import DailyVisit from "../models/Daily-Visit.js";
+import ExcelJS from "exceljs";
 import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
 import mongoose from "mongoose";
@@ -621,5 +622,300 @@ export const getSubOrdinateDailyReport = async (req, res) => {
   } catch (error) {
     console.error("Failed to get the daily visit report", error);
     res.status(500).json({ success: false, message: error?.message });
+  }
+};
+
+export const exportOrganizationDailyVisitList = async (req, res) => {
+  try {
+    let { employeeId, dateFrom, dateTo } = req?.body;
+
+    const filter = {
+      organizationId: req?.organization?.id,
+      ...(employeeId && { employeeId: employeeId }),
+    };
+    if (dateFrom || dateTo) {
+      filter.visitDate = {};
+      if (dateFrom) filter.visitDate.$gte = dateFrom;
+      if (dateTo) filter.visitDate.$lte = dateTo;
+    }
+
+    const dailyVisitList = await DailyVisit.find(filter, {
+      organizationId: 0,
+      updatedAt: 0,
+      __v: 0,
+    })
+      .populate("doctorId", "_id name specialty")
+      .populate("areaId", "name _id")
+      .populate("employeeId", "firstName lastName employeeId role")
+      .populate("assistedBy", "firstName lastName employeeId")
+      .sort({ visitDate: -1 });
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Visit Report");
+
+    worksheet.columns = [
+      { header: "Name", key: "name", width: 25 },
+      { header: "Role", key: "role", width: 15 },
+      { header: "Areas Visited", key: "areas", width: 30 },
+      { header: "Doctors Visited", key: "doctors", width: 40 },
+      { header: "Visit Date", key: "visitDate", width: 15 },
+      { header: "With", key: "assistedBy", width: 20 },
+      { header: "Remark", key: "remark", width: 40 },
+    ];
+
+    dailyVisitList.forEach((visit) => {
+      worksheet.addRow({
+        name: `${visit.employeeId?.firstName || ""} ${visit.employeeId?.lastName || ""}`.trim(),
+        role: visit.employeeId?.role || "",
+        areas: visit.areaId
+          ?.map((a) => a?.name)
+          .filter(Boolean)
+          .join(", "),
+        doctors: visit.doctorId
+          ?.map((d) => d?.name)
+          .filter(Boolean)
+          .join(", "),
+        visitDate: visit.visitDate || "",
+        assistedBy: visit.assistedBy
+          ? `${visit.assistedBy?.firstName || ""} ${visit.assistedBy?.lastName || ""}`.trim()
+          : "-",
+        remark: visit.remark || "",
+      });
+    });
+
+    worksheet.getRow(1).font = { bold: true };
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=visit_report_${Date.now()}.xlsx`,
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Failed to export visit report", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to export visit report",
+    });
+  }
+};
+
+export const exportDoctorVisitReport = async (req, res) => {
+  try {
+    const {
+      month,
+      year,
+      doctorId,
+      doctorName,
+      minVisits,
+      maxVisits,
+      headQuarterId,
+    } = req.query;
+
+    let organizationId;
+    let employeeId;
+    let restrictHeadQuarterIds;
+
+    if (req?.employee?._id) {
+      let employee = req.employee;
+      if (!employee.assignedDoctors) {
+        employee = await mongoose
+          .model("Employee")
+          .findById(employee._id)
+          .lean();
+      }
+      if (!employee) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
+      }
+      organizationId = employee.organizationId;
+      employeeId = employee._id;
+      restrictHeadQuarterIds = employee.assignedHeadQuarters;
+    } else if (req?.organization?.id) {
+      organizationId = req.organization.id;
+    } else {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const doctorMatchStage = {
+      organizationId: new mongoose.Types.ObjectId(organizationId),
+    };
+    if (doctorId) {
+      doctorMatchStage._id = new mongoose.Types.ObjectId(doctorId);
+    }
+    if (doctorName) {
+      doctorMatchStage.name = { $regex: doctorName, $options: "i" };
+    }
+
+    const visitBaseMatch = {
+      organizationId: new mongoose.Types.ObjectId(organizationId),
+    };
+    if (employeeId) {
+      visitBaseMatch.employeeId = new mongoose.Types.ObjectId(employeeId);
+    }
+    if (year && month) {
+      visitBaseMatch.visitDate = {
+        $regex: `^${year}-${String(month).padStart(2, "0")}`,
+      };
+    } else if (year) {
+      visitBaseMatch.visitDate = { $regex: `^${year}-` };
+    }
+
+    const visitCountFilter = {};
+    if (minVisits !== undefined && maxVisits !== undefined) {
+      visitCountFilter.$gte = parseInt(minVisits);
+      visitCountFilter.$lte = parseInt(maxVisits);
+    } else if (minVisits !== undefined) {
+      if (parseInt(minVisits) >= 3) {
+        visitCountFilter.$gte = 3;
+      } else {
+        visitCountFilter.$eq = parseInt(minVisits);
+      }
+    }
+    const hasVisitCountFilter = Object.keys(visitCountFilter).length > 0;
+
+    let headQuarterMatch = [];
+    if (headQuarterId) {
+      if (
+        restrictHeadQuarterIds &&
+        !restrictHeadQuarterIds.map(String).includes(String(headQuarterId))
+      ) {
+        headQuarterMatch = [
+          { $match: { "area.headQuarterId": new mongoose.Types.ObjectId() } },
+        ];
+      } else {
+        headQuarterMatch = [
+          {
+            $match: {
+              "area.headQuarterId": new mongoose.Types.ObjectId(headQuarterId),
+            },
+          },
+        ];
+      }
+    } else if (restrictHeadQuarterIds) {
+      headQuarterMatch = [
+        {
+          $match: {
+            "area.headQuarterId": {
+              $in: restrictHeadQuarterIds.map(
+                (id) => new mongoose.Types.ObjectId(id),
+              ),
+            },
+          },
+        },
+      ];
+    }
+
+    const basePipeline = [
+      {
+        $lookup: {
+          from: "areas",
+          localField: "areaId",
+          foreignField: "_id",
+          as: "area",
+        },
+      },
+      { $unwind: { path: "$area", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "headquarters",
+          localField: "area.headQuarterId",
+          foreignField: "_id",
+          as: "headquarter",
+        },
+      },
+      { $unwind: { path: "$headquarter", preserveNullAndEmptyArrays: true } },
+      ...headQuarterMatch,
+      {
+        $lookup: {
+          from: "dailyvisits",
+          let: { doctorId: "$_id" },
+          pipeline: [
+            { $match: visitBaseMatch },
+            { $unwind: "$doctorId" },
+            { $match: { $expr: { $eq: ["$$doctorId", "$doctorId"] } } },
+          ],
+          as: "visits",
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          doctorId: "$_id",
+          doctorName: "$name",
+          specialty: "$specialty",
+          totalVisits: { $size: "$visits" },
+          headQuarterName: "$headquarter.headQuarterName",
+          visitDates: {
+            $reduce: {
+              input: "$visits.visitDate",
+              initialValue: "",
+              in: {
+                $cond: [
+                  { $eq: ["$$value", ""] },
+                  "$$this",
+                  { $concat: ["$$value", ", ", "$$this"] },
+                ],
+              },
+            },
+          },
+        },
+      },
+      ...(hasVisitCountFilter
+        ? [{ $match: { totalVisits: visitCountFilter } }]
+        : []),
+      { $sort: { totalVisits: -1, doctorName: 1 } },
+    ];
+
+    const report = await mongoose
+      .model("Doctor")
+      .aggregate([{ $match: doctorMatchStage }, ...basePipeline]);
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Doctor Visit Report");
+
+    worksheet.columns = [
+      { header: "Doctor Name", key: "doctorName", width: 25 },
+      { header: "Specialty", key: "specialty", width: 20 },
+      { header: "Total Visits", key: "totalVisits", width: 15 },
+      { header: "Headquarter", key: "headQuarterName", width: 25 },
+      { header: "Visit Dates", key: "visitDates", width: 50 },
+    ];
+
+    report.forEach((row) => {
+      worksheet.addRow({
+        doctorName: row.doctorName || "",
+        specialty: row.specialty || "",
+        totalVisits: row.totalVisits,
+        headQuarterName: row.headQuarterName || "",
+        visitDates: row.visitDates || "",
+      });
+    });
+
+    worksheet.getRow(1).font = { bold: true };
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=doctor_visit_report_${Date.now()}.xlsx`,
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Failed to export doctor visit report", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to export doctor visit report",
+    });
   }
 };

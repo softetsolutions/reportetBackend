@@ -28,6 +28,10 @@ export const getCellStringValue = (value) => {
     return String(value).trim();
   }
 
+  if (value?.hyperlink !== undefined && value?.text !== undefined) {
+    return getCellStringValue(value.text);
+  }
+
   // rich text cell
   if (value?.richText && Array.isArray(value.richText)) {
     return value.richText

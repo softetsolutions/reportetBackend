@@ -2,6 +2,7 @@ import Area from "../models/Area.js";
 import Employee from "../models/Employee.js";
 import HeadQuarter from "../models/HeadQuarter.js";
 import Doctor from "../models/Doctor.js";
+import { getCellStringValue } from "../utils/helperFunction.js";
 
 import fs from "fs";
 import ExcelJS from "exceljs";
@@ -54,24 +55,23 @@ export const getAreas = async (req, res) => {
   try {
     const pageNo = Number(req.body.pageNo) || 1;
     const limit = Number(req.body.limit) || 5;
-    const {name,headQuarterName}=req.body
+    const { name, headQuarterName } = req.body;
 
     const filter = {
       organizationId: req?.organization?.id,
     };
 
-      if (name?.trim()) {
+    if (name?.trim()) {
       filter.name = { $regex: name.trim(), $options: "i" };
     }
 
-    
     if (headQuarterName?.trim()) {
       const matchingHQs = await HeadQuarter.find(
         {
           headQuarterName: { $regex: headQuarterName.trim(), $options: "i" },
           organizationId: req?.organization?.id,
         },
-        { _id: 1 }
+        { _id: 1 },
       );
 
       const hqIds = matchingHQs.map((hq) => hq._id);
@@ -122,44 +122,213 @@ export const getAreaById = async (req, res) => {
 };
 
 export const importAreasFromExcel = async (req, res) => {
+  const filePath = req.file?.path;
   try {
-    const filePath = req.file.path;
+    const {
+      sheetNo = 0,
+      rowNumber = 2,
+      areaColumnName = "Area Name",
+      headQuarterColumnName = "Headquarter Name",
+    } = req?.body;
+    const organizationId = req?.organization?._id;
+
+    const escapeRegex = (value) =>
+      String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
-    const sheet = workbook.getWorksheet(1);
 
-    let importedCount = 0;
-
-    for (let i = 2; i <= sheet.rowCount; i++) {
-      const row = sheet.getRow(i);
-      const name = row.getCell(1).value?.toString().trim();
-
-      if (!name) continue;
-
-      const existing = await Area.findOne({
-        name,
-        organizationId: req.organization._id,
+    const worksheet = workbook.worksheets[sheetNo];
+    if (!worksheet) {
+      fs.unlinkSync(filePath);
+      return res.status(400).json({
+        success: false,
+        message: "Invalid sheet number",
       });
-      if (!existing) {
-        await Area.create({ name, organizationId: req.organization._id });
-        importedCount++;
-      }
     }
+
+    const areaRows = [];
+    const skippedRows = [];
+    const fileDuplicateAreas = [];
+
+    const seenAreaKeys = new Map();
+
+    worksheet.eachRow({ includeEmpty: false }, (row, number) => {
+      if (number < rowNumber) return;
+
+      const areaName = getCellStringValue(row.getCell(2).value);
+      const headQuarterName = getCellStringValue(row.getCell(3).value);
+
+      if (!areaName || !headQuarterName) {
+        skippedRows.push({
+          row: number,
+          reason: !areaName ? "Missing area name" : "Missing headquarter name",
+        });
+        return;
+      }
+
+      const areaKey = `${headQuarterName.trim().toUpperCase()}::${areaName
+        .trim()
+        .toUpperCase()}`;
+
+      if (seenAreaKeys.has(areaKey)) {
+        const first = seenAreaKeys.get(areaKey);
+        fileDuplicateAreas.push({
+          row: number,
+          name: areaName,
+          headquarter: headQuarterName,
+          reason: `Duplicate of row ${first.row} in this file (same area under same headquarter)`,
+        });
+        return;
+      }
+      seenAreaKeys.set(areaKey, { row: number });
+
+      areaRows.push({ areaName, headQuarterName, row: number });
+    });
 
     fs.unlinkSync(filePath);
 
-    res
-      .status(200)
-      .json({ message: `${importedCount} areas imported successfully.` });
+    if (!areaRows.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid area rows found in the sheet",
+        skippedRows,
+        duplicates: { areas: fileDuplicateAreas },
+      });
+    }
+
+    const uniqueHQNames = [...new Set(areaRows.map((r) => r.headQuarterName))];
+    const hqQuery = uniqueHQNames.map((name) => ({
+      headQuarterName: {
+        $regex: new RegExp(`^${escapeRegex(name)}$`, "i"),
+      },
+    }));
+
+    const matchingHQs = await HeadQuarter.find({
+      organizationId,
+      $or: hqQuery,
+    }).select("_id headQuarterName");
+
+    const hqNameToId = matchingHQs.reduce((acc, hq) => {
+      acc[hq.headQuarterName.toUpperCase()] = hq._id;
+      return acc;
+    }, {});
+
+    const unmatchedHQs = [];
+    const candidateAreas = [];
+
+    areaRows.forEach((row) => {
+      const hqId = hqNameToId[row.headQuarterName.toUpperCase()];
+      if (!hqId) {
+        unmatchedHQs.push(row);
+        skippedRows.push({
+          row: row.row,
+          reason: `Headquarter "${row.headQuarterName}" not found in this organization`,
+        });
+        return;
+      }
+      candidateAreas.push({
+        name: row.areaName,
+        headQuarterId: hqId,
+        organizationId,
+        _row: row.row,
+        _hqName: row.headQuarterName,
+      });
+    });
+
+    const areaNamesByHQ = candidateAreas.reduce((acc, a) => {
+      const key = String(a.headQuarterId);
+      if (!acc[key]) acc[key] = new Set();
+      acc[key].add(a.name.trim().toUpperCase());
+      return acc;
+    }, {});
+
+    const existingAreaOrClauses = Object.entries(areaNamesByHQ).map(
+      ([hqId, names]) => ({
+        headQuarterId: hqId,
+        $or: [...names].map((name) => ({
+          name: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") },
+        })),
+      }),
+    );
+
+    const existingAreasInDB = existingAreaOrClauses.length
+      ? await Area.find({ organizationId, $or: existingAreaOrClauses })
+      : [];
+
+    const existingAreaKeys = new Set(
+      existingAreasInDB.map(
+        (a) => `${String(a.headQuarterId)}::${a.name.trim().toUpperCase()}`,
+      ),
+    );
+
+    const dbDuplicateAreas = [];
+    const areasToInsert = [];
+
+    candidateAreas.forEach((a) => {
+      const key = `${String(a.headQuarterId)}::${a.name.trim().toUpperCase()}`;
+      if (existingAreaKeys.has(key)) {
+        dbDuplicateAreas.push({
+          row: a._row,
+          name: a.name,
+          headquarter: a._hqName,
+          reason: "This area already exists under this headquarter",
+        });
+        return;
+      }
+      const { _row, _hqName, ...toInsert } = a;
+      areasToInsert.push(toInsert);
+    });
+
+    let insertedCount = 0;
+
+    if (areasToInsert.length) {
+      try {
+        const inserted = await Area.insertMany(areasToInsert, {
+          ordered: false,
+        });
+        insertedCount = inserted.length;
+      } catch (error) {
+        insertedCount =
+          error.insertedDocs?.length || error.result?.nInserted || 0;
+      }
+    }
+
+    const duplicateAreas = [...fileDuplicateAreas, ...dbDuplicateAreas];
+
+    res.status(200).json({
+      success: true,
+      message: `${insertedCount} area(s) imported successfully.${
+        duplicateAreas.length
+          ? ` ${duplicateAreas.length} duplicate row(s) were skipped.`
+          : ""
+      }`,
+      summary: {
+        insertedCount,
+        skippedDuplicateCount: duplicateAreas.length,
+        skippedRowCount: skippedRows.length,
+      },
+      duplicates: {
+        areas: duplicateAreas,
+      },
+      skippedRows,
+      skippedDueToUnmatchedHeadquarter: unmatchedHQs,
+    });
   } catch (err) {
     console.error("Area Import Error:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to import areas from Excel file." });
+    res.status(500).json({
+      success: false,
+      message: "Failed to import areas from Excel file.",
+    });
+  } finally {
+    if (filePath) {
+      fs.unlink(filePath, (unlinkErr) => {
+        if (unlinkErr)
+          console.error("Failed to delete uploaded file:", unlinkErr.message);
+      });
+    }
   }
 };
-
 export const getAreasByHeadQuarterId = async (req, res) => {
   try {
     const areas = await Area.find(
@@ -307,10 +476,10 @@ export const deleteArea = async (req, res) => {
     const { areaId } = req.params;
     const { force } = req.query;
 
-console.log("force param:", req.query.force, typeof req.query.force);
+    console.log("force param:", req.query.force, typeof req.query.force);
     const linkedDoctorCount = await Doctor.countDocuments({ areaId });
 
-    if (linkedDoctorCount > 0&& force !== "true") {
+    if (linkedDoctorCount > 0 && force !== "true") {
       return res.status(409).json({
         success: false,
         hasLinkedDoctors: true,

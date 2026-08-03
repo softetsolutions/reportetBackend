@@ -5,9 +5,11 @@ import {
   createDailyVisit,
   getDailyVisitList,
   getOrganizationDailyVisitList,
+  exportOrganizationDailyVisitList,
   updateDailyVisit,
   deleteDailyVisit,
   getDoctorVisitReport,
+  exportDoctorVisitReport,
   getSubOrdinateDailyReport,
 } from "../controllers/dailyVisit.js";
 
@@ -22,7 +24,14 @@ router.post(
   orgAuth,
   getOrganizationDailyVisitList,
 );
+router.post(
+  "/exportOrganizationVisitList",
+  orgAuth,
+  exportOrganizationDailyVisitList,
+);
 router.get("/getDoctorVisitReport", authOrOrg, getDoctorVisitReport);
+router.get("/exportDoctorVisitReport", authOrOrg, exportDoctorVisitReport);
+
 router.put("/:id", orgAuth, updateDailyVisit);
 router.delete("/:id", orgAuth, deleteDailyVisit);
 
