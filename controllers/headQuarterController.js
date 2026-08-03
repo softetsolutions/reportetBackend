@@ -398,8 +398,8 @@ export const deleteHeadquarter = async (req, res) => {
 
 export const importHeadquartersFromExcel = async (req, res) => {
   const session = await mongoose.startSession();
+  const filePath = req.file?.path;
   try {
-    const filePath = req.file.path;
     const { sheetNo = 0, rowNumber = 2, toRow } = req?.body;
     const organizationId = req?.organization?._id;
     const endRow = toRow ? Number(toRow) : Infinity;
@@ -412,7 +412,7 @@ export const importHeadquartersFromExcel = async (req, res) => {
 
     const worksheet = workbook.worksheets[sheetNo];
     if (!worksheet) {
-      fs.unlinkSync(filePath);
+      //fs.unlinkSync(filePath);
       return res.status(400).json({
         success: false,
         message: "Invalid sheet number",
@@ -493,7 +493,7 @@ export const importHeadquartersFromExcel = async (req, res) => {
       }
     });
 
-    fs.unlinkSync(filePath);
+    //fs.unlinkSync(filePath);
 
     if (!Object.keys(hqMap).length) {
       return res.status(400).json({
@@ -715,5 +715,11 @@ export const importHeadquartersFromExcel = async (req, res) => {
     });
   } finally {
     await session.endSession();
+    if (filePath) {
+      fs.unlink(filePath, (unlinkErr) => {
+        if (unlinkErr)
+          console.error("Failed to delete uploaded file:", unlinkErr.message);
+      });
+    }
   }
 };

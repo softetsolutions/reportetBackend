@@ -140,8 +140,8 @@ export const getAllDoctors = async (req, res) => {
 };
 
 export const importDoctorsFromExcel = async (req, res) => {
+  const filePath = req.file?.path;
   try {
-    const filePath = req.file.path;
     const {
       sheetNo = 0,
       rowNumber = 2,
@@ -336,6 +336,13 @@ export const importDoctorsFromExcel = async (req, res) => {
     res
       .status(500)
       .json({ message: "Failed to import doctors from Excel file." });
+  } finally {
+    if (filePath) {
+      fs.unlink(filePath, (unlinkErr) => {
+        if (unlinkErr)
+          console.error("Failed to delete uploaded file:", unlinkErr.message);
+      });
+    }
   }
 };
 export const getDoctorByMrId = async (req, res) => {

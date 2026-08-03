@@ -122,8 +122,8 @@ export const getAreaById = async (req, res) => {
 };
 
 export const importAreasFromExcel = async (req, res) => {
+  const filePath = req.file?.path;
   try {
-    const filePath = req.file.path;
     const {
       sheetNo = 0,
       rowNumber = 2,
@@ -320,6 +320,13 @@ export const importAreasFromExcel = async (req, res) => {
       success: false,
       message: "Failed to import areas from Excel file.",
     });
+  } finally {
+    if (filePath) {
+      fs.unlink(filePath, (unlinkErr) => {
+        if (unlinkErr)
+          console.error("Failed to delete uploaded file:", unlinkErr.message);
+      });
+    }
   }
 };
 export const getAreasByHeadQuarterId = async (req, res) => {
