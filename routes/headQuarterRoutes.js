@@ -8,6 +8,7 @@ import {
   editHeadquarter,
   deleteHeadquarter,
   importHeadquartersFromExcel,
+  getUnassignedHierarchy,
 } from "../controllers/headQuarterController.js";
 import { authOrOrg, orgAuth } from "../middleware/authMiddleware.js";
 
@@ -26,5 +27,6 @@ router.post(
   upload.single("file"),
   importHeadquartersFromExcel,
 );
+router.get("/unassigned", orgAuth, getUnassignedHierarchy);
 
 export default router;

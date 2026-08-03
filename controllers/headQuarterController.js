@@ -723,3 +723,67 @@ export const importHeadquartersFromExcel = async (req, res) => {
     }
   }
 };
+
+export const getUnassignedHierarchy = async (req, res) => {
+  try {
+    const organizationId = req?.organization?._id;
+
+    const [areaManagers, mrs, allHQs] = await Promise.all([
+      Employee.find(
+        { organizationId, role: "areaManager", isActive: true },
+        { firstName: 1, lastName: 1, employeeId: 1, assignedHeadQuarters: 1 },
+      ).populate("assignedHeadQuarters", "headQuarterName location"),
+
+      Employee.find(
+        { organizationId, role: "mr", isActive: true },
+        { assignedHeadQuarters: 1 },
+      ),
+
+      HeadQuarter.find({ organizationId }, { headQuarterName: 1, location: 1 }),
+    ]);
+
+    const hqIdsWithAreaManager = new Set(
+      areaManagers.flatMap((am) =>
+        am.assignedHeadQuarters.map((hq) => String(hq._id)),
+      ),
+    );
+
+    const hqIdsWithMR = new Set(
+      mrs.flatMap((mr) => mr.assignedHeadQuarters.map((id) => String(id))),
+    );
+
+    const headquartersWithoutAreaManager = allHQs.filter(
+      (hq) => !hqIdsWithAreaManager.has(String(hq._id)),
+    );
+
+    const areaManagersWithoutMR = areaManagers
+      .map((am) => {
+        const uncoveredHQs = am.assignedHeadQuarters.filter(
+          (hq) => !hqIdsWithMR.has(String(hq._id)),
+        );
+        return uncoveredHQs.length
+          ? {
+              _id: am._id,
+              employeeId: am.employeeId,
+              name: `${am.firstName} ${am.lastName}`,
+              headquartersWithoutMR: uncoveredHQs,
+            }
+          : null;
+      })
+      .filter(Boolean);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        headquartersWithoutAreaManager,
+        areaManagersWithoutMR,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching unassigned hierarchy:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Unable to fetch unassigned hierarchy details",
+    });
+  }
+};

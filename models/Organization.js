@@ -7,6 +7,8 @@ const orgSchema = new mongoose.Schema(
     password: { type: String, required: true },
     role: { type: String, default: "admin" },
     code: { type: String, unique: true, required: true },
+    brandName: { type: String, default: "ReportET" },
+    logoUrl: { type: String, default: null },
   },
   { timestamps: true },
 );
