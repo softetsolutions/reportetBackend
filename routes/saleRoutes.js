@@ -7,6 +7,7 @@ import {
   deleteSale,
   getSalesListOfEmployee,
   alreadySubmitedSale,
+  getHeadQuarterSales,
 } from "../controllers/saleController.js";
 import { auth, orgAuth } from "../middleware/authMiddleware.js";
 
@@ -19,5 +20,6 @@ router.post("/exportAllSales", orgAuth, exportAllSales);
 router.get("/alreadySubmitedSales", auth, alreadySubmitedSale);
 router.put("/:id", orgAuth, updateSale);
 router.delete("/:id", orgAuth, deleteSale);
+router.post("/headQuarterSales/:headQuarterId", getHeadQuarterSales);
 
 export default router;

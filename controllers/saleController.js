@@ -1,6 +1,7 @@
 import Sale from "../models/Sale.js";
 import dayjs from "dayjs";
 import ExcelJS from "exceljs";
+import Stockist from "../models/Stockist.js";
 import { currentYearInIndia } from "../utils/helperFunction.js";
 
 export const createSale = async (req, res) => {
@@ -320,6 +321,60 @@ export const exportAllSales = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to export sales report",
+    });
+  }
+};
+
+export const getHeadQuarterSales = async (req, res) => {
+  try {
+    const { headQuarterId } = req.params;
+    const { years } = req.body;
+    const organizationId = req?.organization?.id;
+
+    if (!headQuarterId) {
+      return res.status(422).json({
+        success: false,
+        message: "headQuarterId is required",
+      });
+    }
+
+    const stockists = await Stockist.find(
+      { organizationId, headQuarter: headQuarterId },
+      { _id: 1 },
+    );
+
+    const filter = {
+      organizationId,
+      stockist: { $in: stockists.map((s) => s._id) },
+    };
+
+    if (years?.length > 0) {
+      const yearConditions = years.map((year) => {
+        const start = new Date(`${year}-01-01T00:00:00.000Z`);
+        const end = new Date(`${year}-12-31T23:59:59.999Z`);
+        return { createdAt: { $gte: start, $lte: end } };
+      });
+
+      filter.$or = yearConditions;
+    }
+
+    const sales = await Sale.find(filter, {
+      _id: 1,
+      stockist: 1,
+      month: 1,
+      saleAmount: 1,
+      createdAt: 1,
+    }).lean();
+
+    res.status(200).json({
+      success: true,
+      data: sales,
+    });
+  } catch (error) {
+    console.error("Unable to fetch headquarter sales", error);
+    res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to fetch headquarter sales",
     });
   }
 };
