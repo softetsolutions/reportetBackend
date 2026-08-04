@@ -23,6 +23,13 @@ const dailyVisit = new mongoose.Schema(
       ref: "Employee",
       default: null,
     },
+    with: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Employee",
+        default: null,
+      },
+    ],
     remark: { type: String, default: "-" },
     visitDate: { type: String, required: true },
   },

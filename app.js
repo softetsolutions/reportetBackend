@@ -3,6 +3,8 @@ import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import cors from "cors";
 import fs from "fs";
+import mongoose from "mongoose";
+// import { middleware } from "visualize-et";
 
 import authRoutes from "./routes/authRoutes.js";
 import orgRoutes from "./routes/orgAuthRoutes.js";
@@ -42,6 +44,8 @@ app.use("/uploads", express.static("uploads"));
 
 const swaggerDocument = yaml.load("./swagger.yaml");
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+
+// app.use("/schema-viz", middleware(mongoose));
 
 app.get("/ping", (req, res) => {
   res.json({

@@ -1,3 +1,5 @@
+import { roleOrder } from "../config/constants.js";
+
 export const generateOrganizationCode = (organizationName) => {
   const words = organizationName.trim().split(/\s+/);
 
@@ -47,3 +49,15 @@ export const getCellStringValue = (value) => {
 export const currentYearInIndia = new Date(
   new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
 ).getFullYear();
+
+export const getSuperiorRoles = (employeeRole) => {
+  const employeeRoleIndex = roleOrder.indexOf(employeeRole);
+  return employeeRoleIndex === -1 ? [] : roleOrder.slice(employeeRoleIndex);
+};
+
+export const getSubordinateRoles = (employeeRole) => {
+  const employeeRoleIndex = roleOrder.indexOf(employeeRole);
+  return employeeRoleIndex === -1
+    ? []
+    : roleOrder.slice(0, employeeRoleIndex + 1);
+};
