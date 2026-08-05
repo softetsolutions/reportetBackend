@@ -1,12 +1,15 @@
 import mongoose from "mongoose";
 import HeadQuarter from "../models/HeadQuarter.js";
 import Employee from "../models/Employee.js";
-//import {brevo} from "../config/mailer.js";
 import { sendMail, sendForgotPasswordMail } from "../config/mailer.js";
-
+import {
+  getSuperiorRoles,
+  getSubordinateRoles,
+} from "../utils/helperFunction.js";
 import Area from "../models/Area.js";
 import crypto from "crypto";
 import Doctor from "../models/Doctor.js";
+
 export const onboardEmployee = async (req, res) => {
   try {
     const {
@@ -532,6 +535,89 @@ export const resetPassword = async (req, res) => {
     });
   } catch (error) {
     console.error("Reset password error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
+  }
+};
+
+export const getSuperiors = async (req, res) => {
+  try {
+    if (!req?.employee) {
+      res.status(403).json({
+        success: false,
+        message: "Sorry you are not employee",
+      });
+      return;
+    }
+    const employeeHeadQuarters =
+      req?.employee?.assignedHeadQuarters?.toObject?.() ?? [];
+    const role = req?.employee?.role;
+    const organizationId = req?.employee?.organizationId;
+    const subordinateRoles = getSubordinateRoles(role);
+
+    const filter = {
+      organizationId: organizationId,
+      role: { $nin: subordinateRoles },
+      assignedHeadQuarters: { $all: employeeHeadQuarters },
+    };
+
+    const superiorList = await Employee.find(filter, {
+      firstName: 1,
+      lastName: 1,
+      role: 1,
+    }).lean();
+
+    res.status(200).json({
+      success: true,
+      data: superiorList,
+    });
+  } catch (error) {
+    console.error("Error in geting superiors:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
+  }
+};
+
+export const getSubordinates = async (req, res) => {
+  try {
+    if (!req?.employee) {
+      res.status(403).json({
+        success: false,
+        message: "Sorry you are not employee",
+      });
+      return;
+    }
+    const employeeHeadQuarters =
+      req?.employee?.assignedHeadQuarters?.toObject?.() ?? [];
+    const role = req?.employee?.role;
+    const organizationId = req?.employee?.organizationId;
+    const superiorRoles = getSuperiorRoles(role);
+
+    const filter = {
+      organizationId: organizationId,
+      role: { $nin: superiorRoles },
+      assignedHeadQuarters: {
+        $not: { $elemMatch: { $nin: employeeHeadQuarters } },
+        $ne: [],
+      },
+    };
+
+    const subordinateList = await Employee.find(filter, {
+      firstName: 1,
+      lastName: 1,
+      role: 1,
+    }).lean();
+
+    res.status(200).json({
+      success: true,
+      data: subordinateList,
+    });
+  } catch (error) {
+    console.error("Error in geting subordinates", error);
     res.status(500).json({
       success: false,
       message: "Server error. Please try again later.",

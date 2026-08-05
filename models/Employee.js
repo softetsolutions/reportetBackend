@@ -17,7 +17,11 @@ const employeeSchema = new mongoose.Schema(
         return `${this.firstName} ${this.lastName}`;
       },
     },
-    role: { type: String, enum: ["mr", "areaManager"], default: "mr" },
+    role: {
+      type: String,
+      enum: ["mr", "areaManager", "zonalManager"],
+      default: "mr",
+    },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",

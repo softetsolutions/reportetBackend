@@ -15,7 +15,7 @@ function toISTDateString(isoString) {
 // Create Daily Visit
 export const createDailyVisit = async (req, res) => {
   try {
-    const { areaId, doctorId, remark, visitDate } = req.body;
+    const { areaId, doctorId, remark, visitDate, withId } = req.body;
     const employeeId = req?.employee?._id;
     const organizationId = req?.employee?.organizationId;
 
@@ -33,6 +33,7 @@ export const createDailyVisit = async (req, res) => {
       employeeId,
       remark,
       organizationId,
+      ...(withId?.length && { with: withId }),
       visitDate: normalizedVisitDate,
     });
 
@@ -148,7 +149,9 @@ export const getOrganizationDailyVisitList = async (req, res) => {
         .populate("doctorId", "_id name specialty")
         .populate("areaId", "name _id")
         .populate("employeeId", "firstName lastName employeeId role")
-        .populate("assistedBy", "firstName lastName employeeId "),
+        .populate("with", "firstName lastName employeeId ")
+        .sort({ visitDate: -1 }),
+      // .populate("assistedBy", "firstName lastName employeeId "),
       DailyVisit.countDocuments(filter),
     ]);
     res.status(200).json({
