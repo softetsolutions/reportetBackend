@@ -11,6 +11,7 @@ import {
   getDoctorVisitReport,
   exportDoctorVisitReport,
   getSubOrdinateDailyReport,
+  getDoctorVisitSummary,
 } from "../controllers/dailyVisit.js";
 
 const router = express.Router();
@@ -31,6 +32,7 @@ router.post(
 );
 router.get("/getDoctorVisitReport", authOrOrg, getDoctorVisitReport);
 router.get("/exportDoctorVisitReport", authOrOrg, exportDoctorVisitReport);
+router.get("/getDoctorVisitSummary", orgAuth, getDoctorVisitSummary);
 
 router.put("/:id", orgAuth, updateDailyVisit);
 router.delete("/:id", orgAuth, deleteDailyVisit);

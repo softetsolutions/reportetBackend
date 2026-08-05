@@ -922,3 +922,188 @@ export const exportDoctorVisitReport = async (req, res) => {
     });
   }
 };
+
+export const getDoctorVisitSummary = async (req, res) => {
+  try {
+    const { month, year, headQuarterId } = req.query;
+
+    let organizationId;
+    let employeeId;
+    let restrictHeadQuarterIds;
+
+    if (req?.employee?._id) {
+      let employee = req.employee;
+
+      if (!employee.assignedHeadQuarters) {
+        employee = await mongoose
+          .model("Employee")
+          .findById(employee._id)
+          .lean();
+      }
+      if (!employee) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
+      }
+      organizationId = employee.organizationId;
+      employeeId = employee._id;
+      restrictHeadQuarterIds = employee.assignedHeadQuarters;
+    } else if (req?.organization?.id) {
+      organizationId = req.organization.id;
+    } else {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    if (headQuarterId && !mongoose.Types.ObjectId.isValid(headQuarterId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid headQuarterId",
+      });
+    }
+
+    if (year && !/^\d{4}$/.test(String(year))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid year parameter",
+      });
+    }
+    if (month && !/^(0?[1-9]|1[0-2])$/.test(String(month))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid month parameter",
+      });
+    }
+
+    const doctorMatchStage = {
+      organizationId: new mongoose.Types.ObjectId(organizationId),
+    };
+
+    const visitBaseMatch = {
+      organizationId: new mongoose.Types.ObjectId(organizationId),
+    };
+    if (employeeId) {
+      visitBaseMatch.employeeId = new mongoose.Types.ObjectId(employeeId);
+    }
+    if (year && month) {
+      visitBaseMatch.visitDate = {
+        $regex: `^${year}-${String(month).padStart(2, "0")}`,
+      };
+    } else if (year) {
+      visitBaseMatch.visitDate = { $regex: `^${year}-` };
+    }
+
+    let headQuarterMatch = [];
+    if (headQuarterId) {
+      if (
+        restrictHeadQuarterIds &&
+        !restrictHeadQuarterIds.map(String).includes(String(headQuarterId))
+      ) {
+        headQuarterMatch = [
+          { $match: { "area.headQuarterId": new mongoose.Types.ObjectId() } },
+        ];
+      } else {
+        headQuarterMatch = [
+          {
+            $match: {
+              "area.headQuarterId": new mongoose.Types.ObjectId(headQuarterId),
+            },
+          },
+        ];
+      }
+    } else if (restrictHeadQuarterIds) {
+      headQuarterMatch = [
+        {
+          $match: {
+            "area.headQuarterId": {
+              $in: restrictHeadQuarterIds.map(
+                (id) => new mongoose.Types.ObjectId(id),
+              ),
+            },
+          },
+        },
+      ];
+    }
+
+    const visitedDoctorRows = await mongoose
+      .model("DailyVisit")
+      .aggregate([
+        { $match: visitBaseMatch },
+        { $unwind: "$doctorId" },
+        { $group: { _id: "$doctorId" } },
+      ]);
+    const visitedDoctorIds = new Set(
+      visitedDoctorRows.map((r) => String(r._id)),
+    );
+
+    const summaryPipeline = [
+      { $match: doctorMatchStage },
+      {
+        $lookup: {
+          from: "areas",
+          localField: "areaId",
+          foreignField: "_id",
+          as: "area",
+        },
+      },
+      { $unwind: { path: "$area", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "headquarters",
+          localField: "area.headQuarterId",
+          foreignField: "_id",
+          as: "headquarter",
+        },
+      },
+      { $unwind: { path: "$headquarter", preserveNullAndEmptyArrays: true } },
+      ...headQuarterMatch,
+      {
+        $project: {
+          headQuarterName: {
+            $ifNull: ["$headquarter.headQuarterName", "Unassigned"],
+          },
+          _id: 1,
+        },
+      },
+    ];
+
+    const doctors = await mongoose.model("Doctor").aggregate(summaryPipeline);
+
+    const grouped = {};
+    for (const doc of doctors) {
+      const key = doc.headQuarterName;
+      if (!grouped[key]) {
+        grouped[key] = { headquarter: key, Visited: 0, "0 Visits": 0 };
+      }
+      if (visitedDoctorIds.has(String(doc._id))) {
+        grouped[key].Visited += 1;
+      } else {
+        grouped[key]["0 Visits"] += 1;
+      }
+    }
+
+    const summary = Object.values(grouped)
+      .map((row) => ({
+        ...row,
+        doctorTotal: row.Visited + row["0 Visits"],
+      }))
+      .sort((a, b) => b.doctorTotal - a.doctorTotal);
+
+    const zeroVisitCount = summary.reduce(
+      (sum, r) => sum + (r["0 Visits"] || 0),
+      0,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: summary,
+      zeroVisitCount,
+    });
+  } catch (error) {
+    console.error("Failed to get doctor visit summary", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch doctor visit summary",
+    });
+  }
+};
