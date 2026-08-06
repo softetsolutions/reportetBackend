@@ -12,6 +12,7 @@ import {
   getSuperiors,
   getSubordinates,
 } from "../controllers/employeeController.js";
+import { getCallAverageReport } from "../controllers/callAverageReportController.js";
 
 const router = express.Router();
 
@@ -19,6 +20,8 @@ router.get("/getAllEmployeeOptions", orgAuth, getAllEmployeeOptions);
 router.get("/getAssignedDetails", auth, getAssignedDoctorAndArea);
 router.get("/getSuperiors", auth, getSuperiors);
 router.get("/getSubordinates", auth, getSubordinates);
+router.get("/call-average", orgAuth, getCallAverageReport);
+
 router.get("/:employeeId", orgAuth, getEmployeeById);
 router.patch("/:employeeId", orgAuth, updateEmployee);
 router.post("/forgot-password", forgotPassword);
