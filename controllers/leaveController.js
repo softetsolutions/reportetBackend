@@ -1,5 +1,6 @@
 import Leave from "../models/Leave.js";
 import Employee from "../models/Employee.js";
+import mongoose from "mongoose";
 
 export const applyLeave = async (req, res) => {
   try {
