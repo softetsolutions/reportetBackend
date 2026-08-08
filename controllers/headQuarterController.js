@@ -20,37 +20,54 @@ export const addHeadquarter = async (req, res) => {
     }
 
     const result = await session.withTransaction(async () => {
-      const headquarters = await HeadQuarter.insertMany(
-        hierrarchy.headquarters,
-        { session },
-      );
+      const organizationId = hierrarchy.headquarters[0].organizationId;
 
-      const locations = [
+      const zoneNames = [
         ...new Set(
-          hierrarchy.headquarters
-            .map((hq) => hq.location?.trim())
-            .filter(Boolean),
+          hierrarchy.headquarters.map((hq) => hq.zone?.trim()).filter(Boolean),
         ),
       ];
 
-      if (locations.length) {
-        const organizationId = hierrarchy.headquarters[0].organizationId;
+      const zoneNameToId = {};
 
+      if (zoneNames.length) {
         const existingZones = await Zone.find({
           organizationId,
-          name: { $in: locations },
+          name: { $in: zoneNames },
         }).session(session);
 
-        const existingZoneNames = new Set(existingZones.map((z) => z.name));
+        existingZones.forEach((z) => {
+          zoneNameToId[z.name.toUpperCase()] = z._id;
+        });
 
-        const newZones = locations
-          .filter((loc) => !existingZoneNames.has(loc))
-          .map((name) => ({ name, organizationId }));
+        const newZoneNames = zoneNames.filter(
+          (name) => !zoneNameToId[name.toUpperCase()],
+        );
 
-        if (newZones.length) {
-          await Zone.insertMany(newZones, { session });
+        if (newZoneNames.length) {
+          const newZones = await Zone.insertMany(
+            newZoneNames.map((name) => ({ name, organizationId })),
+            { session },
+          );
+          newZones.forEach((z) => {
+            zoneNameToId[z.name.toUpperCase()] = z._id;
+          });
         }
       }
+
+      const headquartersToInsert = hierrarchy.headquarters.map((hq) => {
+        const { zone, ...rest } = hq;
+        return {
+          ...rest,
+          zone: zone?.trim()
+            ? zoneNameToId[zone.trim().toUpperCase()]
+            : undefined,
+        };
+      });
+
+      const headquarters = await HeadQuarter.insertMany(headquartersToInsert, {
+        session,
+      });
 
       const areas = hierrarchy?.areas?.length
         ? await Area.insertMany(hierrarchy.areas, { session })
@@ -83,7 +100,7 @@ export const fetchHeadquarterData = async (req, res) => {
     let { pageNo = 1, limit = 5 } = req.body;
     limit = Number(limit);
 
-    const { headQuarterName, location } = req.body;
+    const { headQuarterName, zone } = req.body;
 
     const matchFilter = {
       organizationId: new Types.ObjectId(req?.organization?.id),
@@ -95,17 +112,32 @@ export const fetchHeadquarterData = async (req, res) => {
         $options: "i",
       };
     }
-    if (location?.trim()) {
-      matchFilter.location = { $regex: location.trim(), $options: "i" };
+
+    const basePipeline = [
+      { $match: matchFilter },
+      {
+        $lookup: {
+          from: "zones",
+          localField: "zone",
+          foreignField: "_id",
+          pipeline: [{ $project: { _id: 1, name: 1 } }],
+          as: "zone",
+        },
+      },
+      { $unwind: { path: "$zone", preserveNullAndEmptyArrays: true } },
+    ];
+
+    if (zone?.trim()) {
+      basePipeline.push({
+        $match: { "zone.name": { $regex: zone.trim(), $options: "i" } },
+      });
     }
 
     const headQuartersDetails = await HeadQuarter.aggregate([
+      ...basePipeline,
       {
         $facet: {
           headQuarterDetail: [
-            {
-              $match: matchFilter,
-            },
             {
               $sort: {
                 _id: -1,
@@ -121,7 +153,7 @@ export const fetchHeadquarterData = async (req, res) => {
               $project: {
                 _id: 1,
                 headQuarterName: 1,
-                location: 1,
+                zone: 1,
                 organizationId: 1,
               },
             },
@@ -163,9 +195,6 @@ export const fetchHeadquarterData = async (req, res) => {
           ],
 
           totalCount: [
-            {
-              $match: matchFilter,
-            },
             {
               $count: "totalHeadquarters",
             },
@@ -229,9 +258,9 @@ export const getEmployeeHeadQuarter = async (req, res) => {
         {
           _id: 1,
           headQuarterName: 1,
-          location: 1,
+          zone: 1,
         },
-      );
+      ).populate("zone", "_id name");
 
       res.status(200).json({
         success: true,
@@ -261,7 +290,11 @@ export const getEmployeeHeadQuarter = async (req, res) => {
           updatedAt: 0,
           __v: 0,
         },
-      ).populate("assignedHeadQuarters", "_id headQuarterName location");
+      ).populate({
+        path: "assignedHeadQuarters",
+        select: "_id headQuarterName zone",
+        populate: { path: "zone", select: "_id name" },
+      });
 
       res.status(200).json({
         success: true,
@@ -280,7 +313,7 @@ export const getEmployeeHeadQuarter = async (req, res) => {
 export const editHeadquarter = async (req, res) => {
   try {
     const { headquarterId } = req.params;
-    const { headQuarterName, location } = req.body;
+    const { headQuarterName, zone } = req.body;
 
     if (!headquarterId) {
       return res.status(400).json({
@@ -289,7 +322,7 @@ export const editHeadquarter = async (req, res) => {
       });
     }
 
-    if (!headQuarterName && !location) {
+    if (!headQuarterName && !zone) {
       return res.status(400).json({
         success: false,
         message: "Provide at least one field to update",
@@ -298,7 +331,23 @@ export const editHeadquarter = async (req, res) => {
 
     const updateFields = {};
     if (headQuarterName) updateFields.headQuarterName = headQuarterName;
-    if (location) updateFields.location = location;
+
+    if (zone?.trim()) {
+      const zoneName = zone.trim();
+      let zoneDoc = await Zone.findOne({
+        organizationId: req?.organization?.id,
+        name: { $regex: new RegExp(`^${zoneName}$`, "i") },
+      });
+
+      if (!zoneDoc) {
+        zoneDoc = await Zone.create({
+          name: zoneName,
+          organizationId: req?.organization?.id,
+        });
+      }
+
+      updateFields.zone = zoneDoc._id;
+    }
 
     const updated = await HeadQuarter.findOneAndUpdate(
       {
@@ -307,7 +356,7 @@ export const editHeadquarter = async (req, res) => {
       },
       { $set: updateFields },
       { new: true, runValidators: true },
-    );
+    ).populate("zone", "_id name");
 
     if (!updated) {
       return res.status(404).json({
@@ -436,7 +485,7 @@ export const importHeadquartersFromExcel = async (req, res) => {
       if (number < rowNumber || number > endRow) return;
 
       const hqNameRaw = getCellStringValue(row?.values[2]);
-      const location = getCellStringValue(row?.values[3]);
+      const zoneName = getCellStringValue(row?.values[3]);
       const areaNameRaw = getCellStringValue(row?.values[4]);
       const doctorName = getCellStringValue(row?.values[5]);
       const specialty = getCellStringValue(row?.values[6]);
@@ -451,7 +500,7 @@ export const importHeadquartersFromExcel = async (req, res) => {
 
       const hqKey = hqNameRaw.trim().toUpperCase();
       if (!hqMap[hqKey]) {
-        hqMap[hqKey] = { name: hqNameRaw.trim(), location, areas: {} };
+        hqMap[hqKey] = { name: hqNameRaw.trim(), zone: zoneName, areas: {} };
       }
 
       if (areaNameRaw) {
@@ -529,11 +578,50 @@ export const importHeadquartersFromExcel = async (req, res) => {
         existingHeadquarters.push({ name: hq.headQuarterName });
       });
 
+      // Resolve/create zones for the headquarters that still need to be inserted
+      const zoneNames = [
+        ...new Set(
+          hqKeys
+            .filter((key) => !hqNameToId[key])
+            .map((key) => hqMap[key].zone?.trim())
+            .filter(Boolean),
+        ),
+      ];
+
+      const zoneNameToId = {};
+
+      if (zoneNames.length) {
+        const existingZones = await Zone.find({
+          organizationId,
+          name: { $in: zoneNames },
+        }).session(session);
+
+        existingZones.forEach((z) => {
+          zoneNameToId[z.name.toUpperCase()] = z._id;
+        });
+
+        const newZoneNames = zoneNames.filter(
+          (name) => !zoneNameToId[name.toUpperCase()],
+        );
+
+        if (newZoneNames.length) {
+          const newZones = await Zone.insertMany(
+            newZoneNames.map((name) => ({ name, organizationId })),
+            { session },
+          );
+          newZones.forEach((z) => {
+            zoneNameToId[z.name.toUpperCase()] = z._id;
+          });
+        }
+      }
+
       const newHQs = hqKeys
         .filter((key) => !hqNameToId[key])
         .map((key) => ({
           headQuarterName: hqMap[key].name,
-          location: hqMap[key].location,
+          zone: hqMap[key].zone?.trim()
+            ? zoneNameToId[hqMap[key].zone.trim().toUpperCase()]
+            : undefined,
           organizationId,
         }));
 
@@ -543,27 +631,6 @@ export const importHeadquartersFromExcel = async (req, res) => {
         inserted.forEach((hq) => {
           hqNameToId[hq.headQuarterName.toUpperCase()] = hq._id;
         });
-
-        const locations = [
-          ...new Set(newHQs.map((hq) => hq.location?.trim()).filter(Boolean)),
-        ];
-
-        if (locations.length) {
-          const existingZones = await Zone.find({
-            organizationId,
-            name: { $in: locations },
-          }).session(session);
-
-          const existingZoneNames = new Set(existingZones.map((z) => z.name));
-
-          const newZones = locations
-            .filter((loc) => !existingZoneNames.has(loc))
-            .map((name) => ({ name, organizationId }));
-
-          if (newZones.length) {
-            await Zone.insertMany(newZones, { session });
-          }
-        }
       }
 
       const areaKeyToId = {};
@@ -740,7 +807,7 @@ export const getUnassignedHierarchy = async (req, res) => {
         { organizationId, role: "areaManager", isActive: true },
         { firstName: 1, lastName: 1, employeeId: 1, assignedHeadQuarters: 1 },
       )
-        .populate("assignedHeadQuarters", "headQuarterName location")
+        .populate("assignedHeadQuarters", "headQuarterName zone")
         .lean(),
 
       Employee.find(
@@ -748,10 +815,9 @@ export const getUnassignedHierarchy = async (req, res) => {
         { assignedHeadQuarters: 1 },
       ).lean(),
 
-      HeadQuarter.find(
-        { organizationId },
-        { headQuarterName: 1, location: 1 },
-      ).lean(),
+      HeadQuarter.find({ organizationId }, { headQuarterName: 1, zone: 1 })
+        .populate("zone", "name")
+        .lean(),
     ]);
 
     const hqIdsWithAreaManager = new Set(
@@ -797,6 +863,26 @@ export const getUnassignedHierarchy = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Unable to fetch unassigned hierarchy details",
+    });
+  }
+};
+
+export const getAllZoneNames = async (req, res) => {
+  try {
+    const zones = await Zone.find(
+      { organizationId: req?.organization?.id },
+      { _id: 1, name: 1 },
+    ).sort({ name: 1 });
+
+    res.json({
+      success: true,
+      zones,
+    });
+  } catch (error) {
+    console.error("Unable to fetch zones", error.message);
+    res.json({
+      success: false,
+      message: "Unable to fetch zones, please try again later",
     });
   }
 };

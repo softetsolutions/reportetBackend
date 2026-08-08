@@ -12,6 +12,7 @@ import {
   exportDoctorVisitReport,
   getSubOrdinateDailyReport,
   getDoctorVisitSummary,
+  getDailyWorkingVsReportingSummary,
 } from "../controllers/dailyVisit.js";
 
 const router = express.Router();
@@ -36,5 +37,6 @@ router.get("/getDoctorVisitSummary", orgAuth, getDoctorVisitSummary);
 
 router.put("/:id", orgAuth, updateDailyVisit);
 router.delete("/:id", orgAuth, deleteDailyVisit);
+router.get("/workingReporting", orgAuth, getDailyWorkingVsReportingSummary);
 
 export default router;

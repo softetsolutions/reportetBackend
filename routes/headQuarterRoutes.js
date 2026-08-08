@@ -9,6 +9,7 @@ import {
   deleteHeadquarter,
   importHeadquartersFromExcel,
   getUnassignedHierarchy,
+  getAllZoneNames,
 } from "../controllers/headQuarterController.js";
 import { authOrOrg, orgAuth } from "../middleware/authMiddleware.js";
 
@@ -28,5 +29,6 @@ router.post(
   importHeadquartersFromExcel,
 );
 router.get("/unassigned", orgAuth, getUnassignedHierarchy);
+router.get("/zones", orgAuth, getAllZoneNames);
 
 export default router;

@@ -3,8 +3,11 @@ import ExcelJS from "exceljs";
 import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
 import mongoose from "mongoose";
-
+import Leave from "../models/Leave.js";
+import isSameOrBefore from "dayjs/plugin/isSameOrBefore.js";
+import Employee from "../models/Employee.js";
 import dayjs from "../utils/day.js";
+dayjs.extend(isSameOrBefore);
 
 function toISTDateString(isoString) {
   const date = dayjs(isoString);
@@ -1104,6 +1107,249 @@ export const getDoctorVisitSummary = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch doctor visit summary",
+    });
+  }
+};
+
+export const getDailyWorkingVsReportingSummary = async (req, res) => {
+  try {
+    const {
+      dateFrom,
+      dateTo,
+      month,
+      year,
+      headQuarterId,
+      role = "mr",
+    } = req.query;
+
+    let organizationId;
+    let restrictHeadQuarterIds;
+
+    if (req?.employee?._id) {
+      let employee = req.employee;
+      if (!employee.assignedHeadQuarters) {
+        employee = await Employee.findById(employee._id).lean();
+      }
+      if (!employee) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
+      }
+      organizationId = employee.organizationId;
+      restrictHeadQuarterIds = employee.assignedHeadQuarters;
+    } else if (req?.organization?.id) {
+      organizationId = req.organization.id;
+    } else {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    let startDateStr;
+    let endDateStr;
+
+    if (dateFrom || dateTo) {
+      if (!dateFrom || !dateTo) {
+        return res.status(422).json({
+          success: false,
+          message:
+            "Both dateFrom and dateTo are required when using an explicit date range",
+        });
+      }
+      startDateStr = dateFrom.split("T")[0];
+      endDateStr = dateTo.split("T")[0];
+    } else {
+      const targetYear = year ? parseInt(year, 10) : dayjs().year();
+      const targetMonth = month ? parseInt(month, 10) : dayjs().month() + 1; // 1-12
+
+      if (Number.isNaN(targetYear) || String(targetYear).length !== 4) {
+        return res.status(422).json({
+          success: false,
+          message: "Invalid year parameter",
+        });
+      }
+      if (Number.isNaN(targetMonth) || targetMonth < 1 || targetMonth > 12) {
+        return res.status(422).json({
+          success: false,
+          message: "Invalid month parameter (expected 1-12)",
+        });
+      }
+
+      const monthStart = dayjs(
+        `${targetYear}-${String(targetMonth).padStart(2, "0")}-01`,
+      );
+      startDateStr = monthStart.startOf("month").format("YYYY-MM-DD");
+      endDateStr = monthStart.endOf("month").format("YYYY-MM-DD");
+    }
+
+    if (new Date(startDateStr) > new Date(endDateStr)) {
+      return res.status(422).json({
+        success: false,
+        message: "dateFrom cannot be after dateTo",
+      });
+    }
+
+    if (headQuarterId && !mongoose.Types.ObjectId.isValid(headQuarterId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid headQuarterId",
+      });
+    }
+
+    let scopedHQIdList;
+    if (headQuarterId) {
+      if (
+        restrictHeadQuarterIds &&
+        !restrictHeadQuarterIds.map(String).includes(String(headQuarterId))
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "You are not authorized for this headquarter",
+        });
+      }
+      scopedHQIdList = [new mongoose.Types.ObjectId(headQuarterId)];
+    } else if (restrictHeadQuarterIds) {
+      scopedHQIdList = restrictHeadQuarterIds;
+    }
+
+    const dateList = [];
+    let cursor = dayjs(startDateStr);
+    const end = dayjs(endDateStr);
+    while (cursor.isSameOrBefore(end, "day")) {
+      dateList.push(cursor.format("YYYY-MM-DD"));
+      cursor = cursor.add(1, "day");
+    }
+
+    const employeeFilter = {
+      organizationId,
+      role,
+      isActive: true,
+      ...(scopedHQIdList && { assignedHeadQuarters: { $in: scopedHQIdList } }),
+    };
+
+    const employees = await Employee.find(employeeFilter, { _id: 1 }).lean();
+    const employeeIds = employees.map((e) => e._id);
+    const totalEmployees = employeeIds.length;
+
+    if (!totalEmployees) {
+      return res.status(200).json({
+        success: true,
+        range: { startDate: startDateStr, endDate: endDateStr },
+        data: dateList.map((date) => ({
+          date,
+          totalEmployees: 0,
+          onLeave: 0,
+          expectedToWork: 0,
+          reported: 0,
+          notReported: 0,
+          complianceRate: 0,
+        })),
+        summary: {
+          totalExpected: 0,
+          totalReported: 0,
+          totalNotReported: 0,
+          overallComplianceRate: 0,
+        },
+      });
+    }
+
+    const leaves = await Leave.find(
+      {
+        employeeId: { $in: employeeIds },
+        status: "approved",
+        startDate: { $lte: new Date(endDateStr) },
+        endDate: { $gte: new Date(startDateStr) },
+      },
+      { employeeId: 1, startDate: 1, endDate: 1 },
+    ).lean();
+
+    const visitRows = await DailyVisit.aggregate([
+      {
+        $match: {
+          organizationId: new mongoose.Types.ObjectId(organizationId),
+          employeeId: { $in: employeeIds },
+          visitDate: { $gte: startDateStr, $lte: endDateStr },
+        },
+      },
+      {
+        $group: {
+          _id: { visitDate: "$visitDate", employeeId: "$employeeId" },
+        },
+      },
+      {
+        $group: {
+          _id: "$_id.visitDate",
+          reportedEmployeeIds: { $push: "$_id.employeeId" },
+        },
+      },
+    ]);
+
+    const reportedMap = {};
+    visitRows.forEach((row) => {
+      reportedMap[row._id] = new Set(row.reportedEmployeeIds.map(String));
+    });
+
+    const data = dateList.map((date) => {
+      const dateObj = new Date(date);
+
+      const onLeaveEmployeeIds = new Set(
+        leaves
+          .filter((l) => l.startDate <= dateObj && l.endDate >= dateObj)
+          .map((l) => String(l.employeeId)),
+      );
+
+      const onLeave = onLeaveEmployeeIds.size;
+      const expectedToWork = totalEmployees - onLeave;
+
+      const reportedEmployeeIds = reportedMap[date] || new Set();
+      let reported = 0;
+      reportedEmployeeIds.forEach((id) => {
+        if (!onLeaveEmployeeIds.has(id)) reported += 1;
+      });
+
+      const notReported = Math.max(expectedToWork - reported, 0);
+      const complianceRate =
+        expectedToWork > 0
+          ? Number(((reported / expectedToWork) * 100).toFixed(1))
+          : 0;
+
+      return {
+        date,
+        totalEmployees,
+        onLeave,
+        expectedToWork,
+        reported,
+        notReported,
+        complianceRate,
+      };
+    });
+
+    const totals = data.reduce(
+      (acc, row) => {
+        acc.totalExpected += row.expectedToWork;
+        acc.totalReported += row.reported;
+        acc.totalNotReported += row.notReported;
+        return acc;
+      },
+      { totalExpected: 0, totalReported: 0, totalNotReported: 0 },
+    );
+
+    const overallComplianceRate =
+      totals.totalExpected > 0
+        ? Number(
+            ((totals.totalReported / totals.totalExpected) * 100).toFixed(1),
+          )
+        : 0;
+
+    res.status(200).json({
+      success: true,
+      range: { startDate: startDateStr, endDate: endDateStr },
+      data,
+      summary: { ...totals, overallComplianceRate },
+    });
+  } catch (error) {
+    console.error("Failed to get daily working vs reporting summary", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard summary",
     });
   }
 };
