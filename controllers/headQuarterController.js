@@ -886,3 +886,127 @@ export const getAllZoneNames = async (req, res) => {
     });
   }
 };
+
+export const getHeadquarterAssignments = async (req, res) => {
+  try {
+    const { headquarterId } = req.params;
+    const organizationId = req?.organization?.id;
+
+    if (!headquarterId || !mongoose.isValidObjectId(headquarterId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid headquarter ID is required",
+      });
+    }
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        message: "Organization context is required",
+      });
+    }
+
+    const hqObjectId = new Types.ObjectId(headquarterId);
+    const orgObjectId = new Types.ObjectId(organizationId);
+
+    const employeeFields = {
+      firstName: 1,
+      lastName: 1,
+      employeeId: 1,
+      email: 1,
+      phoneNumber: 1,
+      role: 1,
+    };
+
+    const [headquarter, hqEmployees, areas] = await Promise.all([
+      HeadQuarter.findOne(
+        { _id: hqObjectId, organizationId: orgObjectId },
+        { headQuarterName: 1, zone: 1 },
+      )
+        .populate("zone", "_id name")
+        .lean(),
+
+      Employee.find(
+        {
+          organizationId: orgObjectId,
+          role: { $in: ["areaManager", "mr"] },
+          assignedHeadQuarters: hqObjectId,
+          isActive: true,
+        },
+        employeeFields,
+      ).lean(),
+
+      Area.find(
+        { organizationId: orgObjectId, headQuarterId: hqObjectId },
+        { name: 1, assignedTo: 1 },
+      ).lean(),
+    ]);
+
+    if (!headquarter) {
+      return res.status(404).json({
+        success: false,
+        message: "Headquarter not found or access denied",
+      });
+    }
+
+    const zonalManagers = headquarter.zone
+      ? await Employee.find(
+          {
+            organizationId: orgObjectId,
+            role: "zonalManager",
+            assignedZones: headquarter.zone._id,
+            isActive: true,
+          },
+          employeeFields,
+        ).lean()
+      : [];
+
+    const areaManagers = [];
+    const mrs = [];
+    hqEmployees.forEach((emp) => {
+      if (emp.role === "areaManager") areaManagers.push(emp);
+      else if (emp.role === "mr") mrs.push(emp);
+    });
+
+    const employeeIdToAreas = {};
+    areas.forEach((area) => {
+      if (area.assignedTo) {
+        const key = String(area.assignedTo);
+        (employeeIdToAreas[key] ??= []).push({
+          _id: area._id,
+          name: area.name,
+        });
+      }
+    });
+
+    const withName = ({ role, ...emp }) => ({
+      ...emp,
+      name: `${emp.firstName} ${emp.lastName}`,
+    });
+
+    const mrsWithAreas = mrs.map((mr) => ({
+      ...withName(mr),
+      assignedAreas: employeeIdToAreas[String(mr._id)] || [],
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        headquarter: {
+          _id: headquarter._id,
+          headQuarterName: headquarter.headQuarterName,
+          zone: headquarter.zone || null,
+        },
+        zonalManagers: zonalManagers.map(withName),
+        areaManagers: areaManagers.map(withName),
+        mrs: mrsWithAreas,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching headquarter assignments:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch headquarter assignments",
+    });
+  }
+};

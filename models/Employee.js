@@ -32,6 +32,7 @@ const employeeSchema = new mongoose.Schema(
     assignedHeadQuarters: [
       { type: mongoose.Schema.Types.ObjectId, ref: "Headquarter" },
     ],
+    assignedZones: [{ type: mongoose.Schema.Types.ObjectId, ref: "Zone" }],
     isActive: { type: Boolean, default: true },
     deactivatedAt: { type: Date, default: null },
     resetPasswordToken: { type: String, default: null },

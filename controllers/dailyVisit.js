@@ -276,11 +276,11 @@ export const getDoctorVisitReport = async (req, res) => {
       minVisits,
       maxVisits,
       headQuarterId,
+      role,
     } = req.query;
-    //const organizationId = req?.organization?.id;
+
     let organizationId;
-    let employeeId;
-    let restrictDoctorIds;
+    let restrictEmployeeIds;
     let restrictHeadQuarterIds;
 
     if (req?.employee?._id) {
@@ -297,13 +297,28 @@ export const getDoctorVisitReport = async (req, res) => {
           .json({ success: false, message: "Unauthorized" });
       }
       organizationId = employee.organizationId;
-      employeeId = employee._id;
 
-      restrictHeadQuarterIds = employee.assignedHeadQuarters;
+      const scope = await resolveEmployeeScope(employee);
+      restrictEmployeeIds = scope.restrictEmployeeIds;
+      restrictHeadQuarterIds = scope.restrictHeadQuarterIds;
     } else if (req?.organization?.id) {
       organizationId = req.organization.id;
     } else {
       return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    let roleRestrictionApplied = false;
+    if (role) {
+      const roleFilter = { organizationId, role, isActive: true };
+      if (restrictEmployeeIds) {
+        roleFilter._id = { $in: restrictEmployeeIds };
+      }
+      const roleMatchedEmployees = await mongoose
+        .model("Employee")
+        .find(roleFilter, { _id: 1 })
+        .lean();
+      restrictEmployeeIds = roleMatchedEmployees.map((e) => e._id);
+      roleRestrictionApplied = true;
     }
 
     const page = Math.max(1, parseInt(pageNo));
@@ -320,12 +335,15 @@ export const getDoctorVisitReport = async (req, res) => {
       doctorMatchStage.name = { $regex: doctorName, $options: "i" };
     }
 
-    // Conditions applied inside the lookup pipeline (on DailyVisit docs)
     const visitBaseMatch = {
       organizationId: new mongoose.Types.ObjectId(organizationId),
     };
-    if (employeeId) {
-      visitBaseMatch.employeeId = new mongoose.Types.ObjectId(employeeId);
+
+    if (
+      roleRestrictionApplied ||
+      (restrictEmployeeIds && restrictEmployeeIds.length)
+    ) {
+      visitBaseMatch.employeeId = { $in: restrictEmployeeIds || [] };
     }
     if (year && month) {
       visitBaseMatch.visitDate = {
@@ -407,10 +425,9 @@ export const getDoctorVisitReport = async (req, res) => {
           let: { doctorId: "$_id" },
           pipeline: [
             { $match: visitBaseMatch },
-            { $unwind: "$doctorId" },
             {
               $match: {
-                $expr: { $eq: ["$$doctorId", "$doctorId"] },
+                $expr: { $in: ["$$doctorId", "$doctorId"] },
               },
             },
           ],
@@ -498,7 +515,7 @@ export const getDoctorVisitReport = async (req, res) => {
     res.status(200).json({
       success: true,
       maxTotalVisits,
-      filters: { month, year, minVisits, maxVisits }, //,headquarters
+      filters: { month, year, minVisits, maxVisits, role },
       headquarters,
       data: report,
       pagination: {
@@ -515,7 +532,6 @@ export const getDoctorVisitReport = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 export const getSubOrdinateDailyReport = async (req, res) => {
   try {
     if (req.employee?.role === "mr") {
@@ -844,8 +860,7 @@ export const exportDoctorVisitReport = async (req, res) => {
           let: { doctorId: "$_id" },
           pipeline: [
             { $match: visitBaseMatch },
-            { $unwind: "$doctorId" },
-            { $match: { $expr: { $eq: ["$$doctorId", "$doctorId"] } } },
+            { $match: { $expr: { $in: ["$$doctorId", "$doctorId"] } } },
           ],
           as: "visits",
         },

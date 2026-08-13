@@ -14,6 +14,12 @@ const locationSchema = new mongoose.Schema(
       required: true,
     },
 
+    zoneId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Zone",
+      default: null,
+    },
+
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

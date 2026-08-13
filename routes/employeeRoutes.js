@@ -12,7 +12,10 @@ import {
   getSuperiors,
   getSubordinates,
 } from "../controllers/employeeController.js";
-import { getCallAverageReport } from "../controllers/callAverageReportController.js";
+import {
+  getCallAverageReport,
+  exportCallAverageReport,
+} from "../controllers/callAverageReportController.js";
 
 const router = express.Router();
 
@@ -21,6 +24,7 @@ router.get("/getAssignedDetails", auth, getAssignedDoctorAndArea);
 router.get("/getSuperiors", auth, getSuperiors);
 router.get("/getSubordinates", auth, getSubordinates);
 router.get("/call-average", orgAuth, getCallAverageReport);
+router.get("/call-average/export", orgAuth, exportCallAverageReport);
 
 router.get("/:employeeId", orgAuth, getEmployeeById);
 router.patch("/:employeeId", orgAuth, updateEmployee);
