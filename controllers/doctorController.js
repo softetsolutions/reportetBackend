@@ -470,3 +470,110 @@ export const deleteDoctor = async (req, res) => {
     });
   }
 };
+
+const escapeRegex = (value) =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export const exportDoctors = async (req, res) => {
+  try {
+    if (!req?.organization?.id) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const { name, specialty, areaId, headQuarterId } = req.body;
+
+    const filter = {
+      organizationId: req.organization.id,
+    };
+    if (name?.trim()) {
+      filter.name = { $regex: escapeRegex(name.trim()), $options: "i" };
+    }
+    if (specialty?.trim()) {
+      filter.specialty = {
+        $regex: escapeRegex(specialty.trim()),
+        $options: "i",
+      };
+    }
+
+    if (areaId) {
+      filter.areaId = areaId;
+    } else if (headQuarterId) {
+      const areas = await Area.find(
+        { headQuarterId, organizationId: req.organization.id },
+        { _id: 1 },
+      ).lean();
+      filter.areaId = { $in: areas.map((a) => a._id) };
+    }
+
+    const EXPORT_CAP = 10000;
+    const doctors = await Doctor.find(filter, {
+      _id: 1,
+      name: 1,
+      specialty: 1,
+      areaId: 1,
+      dob: 1,
+      email: 1,
+      phoneNumber: 1,
+    })
+      .populate({
+        path: "areaId",
+        select: "name headQuarterId",
+        populate: { path: "headQuarterId", select: "headQuarterName" },
+      })
+      .sort({ name: 1 })
+      .limit(EXPORT_CAP)
+      .lean();
+
+    if (doctors.length === EXPORT_CAP) {
+      return res.status(400).json({
+        success: false,
+        message: `Export limited to ${EXPORT_CAP} records. Please narrow your filters.`,
+      });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Doctors");
+
+    worksheet.columns = [
+      { header: "Name", key: "name", width: 25 },
+      { header: "Specialty", key: "specialty", width: 20 },
+      { header: "Area", key: "area", width: 25 },
+      { header: "Headquarter", key: "headquarter", width: 25 },
+      { header: "DOB", key: "dob", width: 15 },
+      { header: "Email", key: "email", width: 30 },
+      { header: "Phone Number", key: "phoneNumber", width: 18 },
+    ];
+
+    doctors.forEach((doc) => {
+      worksheet.addRow({
+        name: doc.name || "",
+        specialty: doc.specialty || "",
+        area: doc.areaId?.name || "",
+        headquarter: doc.areaId?.headQuarterId?.headQuarterName || "",
+        dob: doc.dob || "",
+        email: doc.email || "",
+        phoneNumber: doc.phoneNumber || "",
+      });
+    });
+
+    worksheet.getRow(1).font = { bold: true };
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=doctors_${Date.now()}.xlsx`,
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Failed to export doctors", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to export doctors",
+    });
+  }
+};

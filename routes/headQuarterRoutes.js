@@ -10,6 +10,7 @@ import {
   importHeadquartersFromExcel,
   getUnassignedHierarchy,
   getAllZoneNames,
+  getHeadquarterAssignments,
 } from "../controllers/headQuarterController.js";
 import { authOrOrg, orgAuth } from "../middleware/authMiddleware.js";
 
@@ -30,5 +31,6 @@ router.post(
 );
 router.get("/unassigned", orgAuth, getUnassignedHierarchy);
 router.get("/zones", orgAuth, getAllZoneNames);
+router.get("/:headquarterId/assignments", orgAuth, getHeadquarterAssignments);
 
 export default router;

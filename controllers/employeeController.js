@@ -21,6 +21,7 @@ export const onboardEmployee = async (req, res) => {
       phoneNumber,
       role,
       assignedHeadQuarters,
+      assignedZones,
     } = req.body;
 
     if (
@@ -31,7 +32,7 @@ export const onboardEmployee = async (req, res) => {
       !email ||
       !phoneNumber
     ) {
-      res.status(422).json({
+      return res.status(422).json({
         success: false,
         message:
           "One of the required field is missing. Pls fill all required field and try again later.",
@@ -43,28 +44,48 @@ export const onboardEmployee = async (req, res) => {
         success: false,
         message: "Role is required while onboarding the employee",
       });
-    } else if (role === "mr" && assignedHeadQuarters.length > 1) {
-      return res.status(422).json({
-        success: false,
-        message: "If role is mr then only an headquarter can be assigned",
-      });
     }
+
+    if (role === "zonalManager") {
+      if (!assignedZones || assignedZones.length === 0) {
+        return res.status(422).json({
+          success: false,
+          message: "At least one zone must be assigned to a zonal manager",
+        });
+      }
+    } else {
+      // mr / areaManager still use headquarters
+      if (role === "mr" && assignedHeadQuarters?.length > 1) {
+        return res.status(422).json({
+          success: false,
+          message: "If role is mr then only an headquarter can be assigned",
+        });
+      }
+      if (!assignedHeadQuarters || assignedHeadQuarters.length === 0) {
+        return res.status(422).json({
+          success: false,
+          message: "At least one headquarter must be assigned",
+        });
+      }
+    }
+
     const userName =
       req?.organization?.code && employeeId
         ? `${req?.organization?.code}_${employeeId}`
         : undefined;
-    const data = await Employee.create({
-      firstName: firstName,
-      lastName: lastName,
-      userName: userName,
-      employeeId: employeeId,
 
-      email: email,
-      phoneNumber: phoneNumber,
-      password: password,
-      role: role,
+    const data = await Employee.create({
+      firstName,
+      lastName,
+      userName,
+      employeeId,
+      email,
+      phoneNumber,
+      password,
+      role,
       organizationId: req?.organization?.id,
-      assignedHeadQuarters: assignedHeadQuarters,
+      assignedHeadQuarters: role === "zonalManager" ? [] : assignedHeadQuarters,
+      assignedZones: role === "zonalManager" ? assignedZones : [],
     });
 
     sendMail(
@@ -86,12 +107,14 @@ export const onboardEmployee = async (req, res) => {
     });
   }
 };
-
 export const paginatedEmployeeList = async (req, res) => {
   try {
     let { pageNo = 1, limit = 5 } = req.body;
-    const { name, fromDate, toDate } = req.body;
+    const { name, fromDate, toDate, role } = req.body;
     const filter = { organizationId: req?.organization?.id };
+    if (role?.trim()) {
+      filter.role = role.trim();
+    }
 
     if (name?.trim()) {
       const parts = name.trim().split(/\s+/);
@@ -187,6 +210,7 @@ export const getEmployeeById = async (req, res) => {
       organizationId: req?.organization?.id,
     })
       .populate("assignedHeadQuarters", "headQuarterName _id")
+      .populate("assignedZones", "name _id")
       .select("-password -__v -updatedAt");
 
     if (!employee) {
@@ -196,12 +220,24 @@ export const getEmployeeById = async (req, res) => {
       });
     }
 
-    const hqIds = employee.assignedHeadQuarters.map((hq) => hq._id);
+    let assignedAreas = [];
 
-    const assignedAreas = await Area.find(
-      { headQuarterId: { $in: hqIds }, organizationId: req?.organization?.id },
-      { name: 1, _id: 1 },
-    );
+    if (employee.role === "zonalManager") {
+      const zoneIds = employee.assignedZones.map((z) => z._id);
+      assignedAreas = await Area.find(
+        { zoneId: { $in: zoneIds }, organizationId: req?.organization?.id },
+        { name: 1, _id: 1 },
+      );
+    } else {
+      const hqIds = employee.assignedHeadQuarters.map((hq) => hq._id);
+      assignedAreas = await Area.find(
+        {
+          headQuarterId: { $in: hqIds },
+          organizationId: req?.organization?.id,
+        },
+        { name: 1, _id: 1 },
+      );
+    }
 
     const areaIds = assignedAreas.map((a) => a._id);
 
@@ -237,6 +273,7 @@ export const updateEmployee = async (req, res) => {
       "phoneNumber",
       "role",
       "assignedHeadQuarters",
+      "assignedZones",
       "assignedAreas",
       "assignedDoctors",
       "isActive",
@@ -366,15 +403,19 @@ export const getAssignedDoctorAndArea = async (req, res) => {
   try {
     // here we are expecting the employee details in the req object so pls ensure to use auth middleware
 
-    const areas = await Area.find(
-      {
-        headQuarterId: { $in: req?.employee?.assignedHeadQuarters },
-      },
-      {
-        _id: 1,
-        name: 1,
-      },
-    );
+    let areas;
+
+    if (req?.employee?.role === "zonalManager") {
+      areas = await Area.find(
+        { zoneId: { $in: req?.employee?.assignedZones } },
+        { _id: 1, name: 1 },
+      );
+    } else {
+      areas = await Area.find(
+        { headQuarterId: { $in: req?.employee?.assignedHeadQuarters } },
+        { _id: 1, name: 1 },
+      );
+    }
 
     const areaId = areas.map((area) => area._id);
 
@@ -404,7 +445,6 @@ export const getAssignedDoctorAndArea = async (req, res) => {
     });
   }
 };
-
 export const forgotPassword = async (req, res) => {
   try {
     const { userName } = req.body;
@@ -551,8 +591,6 @@ export const getSuperiors = async (req, res) => {
       });
       return;
     }
-    const employeeHeadQuarters =
-      req?.employee?.assignedHeadQuarters?.toObject?.() ?? [];
     const role = req?.employee?.role;
     const organizationId = req?.employee?.organizationId;
     const subordinateRoles = getSubordinateRoles(role);
@@ -560,8 +598,16 @@ export const getSuperiors = async (req, res) => {
     const filter = {
       organizationId: organizationId,
       role: { $nin: subordinateRoles },
-      assignedHeadQuarters: { $all: employeeHeadQuarters },
     };
+
+    if (role === "zonalManager") {
+      const employeeZones = req?.employee?.assignedZones?.toObject?.() ?? [];
+      filter.assignedZones = { $all: employeeZones };
+    } else {
+      const employeeHeadQuarters =
+        req?.employee?.assignedHeadQuarters?.toObject?.() ?? [];
+      filter.assignedHeadQuarters = { $all: employeeHeadQuarters };
+    }
 
     const superiorList = await Employee.find(filter, {
       firstName: 1,
@@ -591,8 +637,6 @@ export const getSubordinates = async (req, res) => {
       });
       return;
     }
-    const employeeHeadQuarters =
-      req?.employee?.assignedHeadQuarters?.toObject?.() ?? [];
     const role = req?.employee?.role;
     const organizationId = req?.employee?.organizationId;
     const superiorRoles = getSuperiorRoles(role);
@@ -600,11 +644,22 @@ export const getSubordinates = async (req, res) => {
     const filter = {
       organizationId: organizationId,
       role: { $nin: superiorRoles },
-      assignedHeadQuarters: {
+    };
+
+    if (role === "zonalManager") {
+      const employeeZones = req?.employee?.assignedZones?.toObject?.() ?? [];
+      filter.assignedZones = {
+        $not: { $elemMatch: { $nin: employeeZones } },
+        $ne: [],
+      };
+    } else {
+      const employeeHeadQuarters =
+        req?.employee?.assignedHeadQuarters?.toObject?.() ?? [];
+      filter.assignedHeadQuarters = {
         $not: { $elemMatch: { $nin: employeeHeadQuarters } },
         $ne: [],
-      },
-    };
+      };
+    }
 
     const subordinateList = await Employee.find(filter, {
       firstName: 1,
