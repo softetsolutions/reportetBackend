@@ -4,6 +4,11 @@ const headQuarterSchema = new mongoose.Schema(
   {
     headQuarterName: String,
     location: String,
+    zone: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Zone",
+      //required: true,
+    },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",

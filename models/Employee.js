@@ -17,21 +17,26 @@ const employeeSchema = new mongoose.Schema(
         return `${this.firstName} ${this.lastName}`;
       },
     },
-    role: { type: String, enum: ["mr", "areaManager"], default: "mr" },
+    role: {
+      type: String,
+      enum: ["mr", "areaManager", "zonalManager"],
+      default: "mr",
+    },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",
       required: true,
     },
-    assignedAreas: [{ type: mongoose.Schema.Types.ObjectId, ref: "Area" }],
-    assignedDoctors: [{ type: mongoose.Schema.Types.ObjectId, ref: "Doctor" }],
+    // assignedAreas: [{ type: mongoose.Schema.Types.ObjectId, ref: "Area" }],
+    // assignedDoctors: [{ type: mongoose.Schema.Types.ObjectId, ref: "Doctor" }],
     assignedHeadQuarters: [
       { type: mongoose.Schema.Types.ObjectId, ref: "Headquarter" },
     ],
+    assignedZones: [{ type: mongoose.Schema.Types.ObjectId, ref: "Zone" }],
     isActive: { type: Boolean, default: true },
     deactivatedAt: { type: Date, default: null },
     resetPasswordToken: { type: String, default: null },
-resetPasswordExpires: { type: Date, default: null },
+    resetPasswordExpires: { type: Date, default: null },
   },
   { timestamps: true },
 );

@@ -1,3 +1,5 @@
+import { roleOrder } from "../config/constants.js";
+
 export const generateOrganizationCode = (organizationName) => {
   const words = organizationName.trim().split(/\s+/);
 
@@ -28,6 +30,10 @@ export const getCellStringValue = (value) => {
     return String(value).trim();
   }
 
+  if (value?.hyperlink !== undefined && value?.text !== undefined) {
+    return getCellStringValue(value.text);
+  }
+
   // rich text cell
   if (value?.richText && Array.isArray(value.richText)) {
     return value.richText
@@ -43,3 +49,15 @@ export const getCellStringValue = (value) => {
 export const currentYearInIndia = new Date(
   new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
 ).getFullYear();
+
+export const getSuperiorRoles = (employeeRole) => {
+  const employeeRoleIndex = roleOrder.indexOf(employeeRole);
+  return employeeRoleIndex === -1 ? [] : roleOrder.slice(employeeRoleIndex);
+};
+
+export const getSubordinateRoles = (employeeRole) => {
+  const employeeRoleIndex = roleOrder.indexOf(employeeRole);
+  return employeeRoleIndex === -1
+    ? []
+    : roleOrder.slice(0, employeeRoleIndex + 1);
+};

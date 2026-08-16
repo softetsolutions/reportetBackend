@@ -5,9 +5,14 @@ import {
   createDailyVisit,
   getDailyVisitList,
   getOrganizationDailyVisitList,
+  exportOrganizationDailyVisitList,
   updateDailyVisit,
   deleteDailyVisit,
-  getDoctorVisitReport
+  getDoctorVisitReport,
+  exportDoctorVisitReport,
+  getSubOrdinateDailyReport,
+  getDoctorVisitSummary,
+  getDailyWorkingVsReportingSummary,
 } from "../controllers/dailyVisit.js";
 
 const router = express.Router();
@@ -15,14 +20,23 @@ const router = express.Router();
 router.post("/create", auth, createDailyVisit);
 router.post("/getVisitList", auth, getDailyVisitList);
 router.get("/getVisitInfo", auth, getDailyVisitInfo);
+router.post("/getSubordinateVisitReport", auth, getSubOrdinateDailyReport);
 router.post(
   "/getOrganizationVisitList",
   orgAuth,
   getOrganizationDailyVisitList,
 );
-router.get("/getDoctorVisitReport",authOrOrg, getDoctorVisitReport);
-router.put("/:id", orgAuth, updateDailyVisit);      
-router.delete("/:id",orgAuth, deleteDailyVisit);
+router.post(
+  "/exportOrganizationVisitList",
+  orgAuth,
+  exportOrganizationDailyVisitList,
+);
+router.get("/getDoctorVisitReport", authOrOrg, getDoctorVisitReport);
+router.get("/exportDoctorVisitReport", authOrOrg, exportDoctorVisitReport);
+router.get("/getDoctorVisitSummary", orgAuth, getDoctorVisitSummary);
 
+router.put("/:id", orgAuth, updateDailyVisit);
+router.delete("/:id", orgAuth, deleteDailyVisit);
+router.get("/workingReporting", orgAuth, getDailyWorkingVsReportingSummary);
 
 export default router;

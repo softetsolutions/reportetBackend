@@ -1,5 +1,7 @@
 import Sale from "../models/Sale.js";
 import dayjs from "dayjs";
+import ExcelJS from "exceljs";
+import Stockist from "../models/Stockist.js";
 import { currentYearInIndia } from "../utils/helperFunction.js";
 
 export const createSale = async (req, res) => {
@@ -139,18 +141,9 @@ export const getAllSales = async (req, res) => {
     pageNo = Number(req.body.pageNo) || 1;
     limit = Number(req.body.limit) || 5;
 
-    // if (dateFrom && dateTo) {
-    //   dateFrom = dayjs
-    //     .tz(dateFrom, "Asia/Kolkata")
-    //     .startOf("day")
-    //     .utc()
-    //     .toDate();
-    //   dateTo = dayjs.tz(dateTo, "Asia/Kolkata").endOf("day").utc().toDate();
-    // }
-
     const filter = {
       organizationId: req?.organization?.id,
-      ...(employeeId && { employeeId: employeeId }),
+      ...(employeeId && { saleBy: employeeId }),
       ...(months && months.length > 0 && { month: { $in: months } }),
     };
 
@@ -249,5 +242,139 @@ export const deleteSale = async (req, res) => {
   } catch (err) {
     console.error("Failed to delete sale", err);
     res.status(400).json({ success: false, error: err.message });
+  }
+};
+
+export const exportAllSales = async (req, res) => {
+  try {
+    let { employeeId, months, years } = req?.body;
+
+    const filter = {
+      organizationId: req?.organization?.id,
+      ...(employeeId && { saleBy: employeeId }),
+      ...(months && months.length > 0 && { month: { $in: months } }),
+    };
+
+    if (years?.length > 0) {
+      const yearConditions = years.map((year) => {
+        const start = new Date(`${year}-01-01T00:00:00.000Z`);
+        const end = new Date(`${year}-12-31T23:59:59.999Z`);
+        return { createdAt: { $gte: start, $lte: end } };
+      });
+
+      if (yearConditions.length === 1) {
+        filter.createdAt = yearConditions[0].createdAt;
+      } else {
+        filter.$or = yearConditions;
+      }
+    }
+
+    const sales = await Sale.find(filter, {
+      organizationId: 0,
+      updatedAt: 0,
+      __v: 0,
+    })
+      .populate("saleBy", "_id firstName lastName role")
+      .populate("stockist", "_id name")
+      .sort({ createdAt: -1 });
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Sales Report");
+
+    worksheet.columns = [
+      { header: "Name", key: "name", width: 25 },
+      { header: "Role", key: "role", width: 15 },
+      { header: "Stockist Name", key: "stockist", width: 25 },
+      { header: "Sale Month", key: "month", width: 15 },
+      { header: "Sale Amount", key: "amount", width: 15 },
+      { header: "Created At", key: "createdAt", width: 20 },
+    ];
+
+    sales.forEach((sale) => {
+      worksheet.addRow({
+        name: `${sale.saleBy?.firstName || ""} ${sale.saleBy?.lastName || ""}`.trim(),
+        role: sale.saleBy?.role || "",
+        stockist: sale.stockist?.name || "",
+        month: sale.month?.toUpperCase() || "",
+        amount: sale.saleAmount,
+        createdAt: sale.createdAt
+          ? new Date(sale.createdAt).toLocaleDateString()
+          : "",
+      });
+    });
+
+    worksheet.getRow(1).font = { bold: true };
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=sales_report_${Date.now()}.xlsx`,
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Failed to export sales report", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to export sales report",
+    });
+  }
+};
+
+export const getHeadQuarterSales = async (req, res) => {
+  try {
+    const { headQuarterId } = req.params;
+    const { years } = req.body;
+    const organizationId = req?.organization?.id;
+
+    if (!headQuarterId) {
+      return res.status(422).json({
+        success: false,
+        message: "headQuarterId is required",
+      });
+    }
+
+    const stockists = await Stockist.find(
+      { organizationId, headQuarter: headQuarterId },
+      { _id: 1 },
+    );
+
+    const filter = {
+      organizationId,
+      stockist: { $in: stockists.map((s) => s._id) },
+    };
+
+    if (years?.length > 0) {
+      const yearConditions = years.map((year) => {
+        const start = new Date(`${year}-01-01T00:00:00.000Z`);
+        const end = new Date(`${year}-12-31T23:59:59.999Z`);
+        return { createdAt: { $gte: start, $lte: end } };
+      });
+
+      filter.$or = yearConditions;
+    }
+
+    const sales = await Sale.find(filter, {
+      _id: 1,
+      stockist: 1,
+      month: 1,
+      saleAmount: 1,
+      createdAt: 1,
+    }).lean();
+
+    res.status(200).json({
+      success: true,
+      data: sales,
+    });
+  } catch (error) {
+    console.error("Unable to fetch headquarter sales", error);
+    res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to fetch headquarter sales",
+    });
   }
 };

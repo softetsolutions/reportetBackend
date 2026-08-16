@@ -23,6 +23,13 @@ const dailyVisit = new mongoose.Schema(
       ref: "Employee",
       default: null,
     },
+    with: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Employee",
+        default: null,
+      },
+    ],
     remark: { type: String, default: "-" },
     visitDate: { type: String, required: true },
   },
@@ -33,5 +40,7 @@ dailyVisit.index(
   { organizationId: 1, employeeId: 1, visitDate: 1 },
   { unique: true },
 );
+
+dailyVisit.index({ visitDate: -1 });
 
 export default mongoose.model("DailyVisit", dailyVisit);

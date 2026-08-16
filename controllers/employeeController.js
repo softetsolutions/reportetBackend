@@ -1,12 +1,15 @@
 import mongoose from "mongoose";
 import HeadQuarter from "../models/HeadQuarter.js";
 import Employee from "../models/Employee.js";
-//import {brevo} from "../config/mailer.js";
-import {sendMail,sendForgotPasswordMail} from "../config/mailer.js";
-
+import { sendMail, sendForgotPasswordMail } from "../config/mailer.js";
+import {
+  getSuperiorRoles,
+  getSubordinateRoles,
+} from "../utils/helperFunction.js";
 import Area from "../models/Area.js";
-import crypto from 'crypto'
+import crypto from "crypto";
 import Doctor from "../models/Doctor.js";
+
 export const onboardEmployee = async (req, res) => {
   try {
     const {
@@ -18,6 +21,7 @@ export const onboardEmployee = async (req, res) => {
       phoneNumber,
       role,
       assignedHeadQuarters,
+      assignedZones,
     } = req.body;
 
     if (
@@ -28,7 +32,7 @@ export const onboardEmployee = async (req, res) => {
       !email ||
       !phoneNumber
     ) {
-      res.status(422).json({
+      return res.status(422).json({
         success: false,
         message:
           "One of the required field is missing. Pls fill all required field and try again later.",
@@ -40,28 +44,48 @@ export const onboardEmployee = async (req, res) => {
         success: false,
         message: "Role is required while onboarding the employee",
       });
-    } else if (role === "mr" && assignedHeadQuarters.length > 1) {
-      return res.status(422).json({
-        success: false,
-        message: "If role is mr then only an headquarter can be assigned",
-      });
     }
+
+    if (role === "zonalManager") {
+      if (!assignedZones || assignedZones.length === 0) {
+        return res.status(422).json({
+          success: false,
+          message: "At least one zone must be assigned to a zonal manager",
+        });
+      }
+    } else {
+      // mr / areaManager still use headquarters
+      if (role === "mr" && assignedHeadQuarters?.length > 1) {
+        return res.status(422).json({
+          success: false,
+          message: "If role is mr then only an headquarter can be assigned",
+        });
+      }
+      if (!assignedHeadQuarters || assignedHeadQuarters.length === 0) {
+        return res.status(422).json({
+          success: false,
+          message: "At least one headquarter must be assigned",
+        });
+      }
+    }
+
     const userName =
       req?.organization?.code && employeeId
         ? `${req?.organization?.code}_${employeeId}`
         : undefined;
-    const data = await Employee.create({
-      firstName: firstName,
-      lastName: lastName,
-      userName: userName,
-      employeeId: employeeId,
 
-      email: email,
-      phoneNumber: phoneNumber,
-      password: password,
-      role: role,
+    const data = await Employee.create({
+      firstName,
+      lastName,
+      userName,
+      employeeId,
+      email,
+      phoneNumber,
+      password,
+      role,
       organizationId: req?.organization?.id,
-      assignedHeadQuarters: assignedHeadQuarters,
+      assignedHeadQuarters: role === "zonalManager" ? [] : assignedHeadQuarters,
+      assignedZones: role === "zonalManager" ? assignedZones : [],
     });
 
     sendMail(
@@ -83,44 +107,41 @@ export const onboardEmployee = async (req, res) => {
     });
   }
 };
-
 export const paginatedEmployeeList = async (req, res) => {
   try {
     let { pageNo = 1, limit = 5 } = req.body;
-    const { name, fromDate, toDate } = req.body;
+    const { name, fromDate, toDate, role } = req.body;
     const filter = { organizationId: req?.organization?.id };
-    
+    if (role?.trim()) {
+      filter.role = role.trim();
+    }
 
-   if (name?.trim()) {
-  const parts = name.trim().split(/\s+/);
-   if (parts.length === 1) {
-    
-    filter.$or = [
-      { firstName: { $regex: parts[0], $options: "i" } },
-      { lastName: { $regex: parts[0], $options: "i" } },
-    ];
-  } else {
-    
-    const first = parts[0];
-    const last = parts.slice(1).join(" ");
-    filter.$and = [
-      { firstName: { $regex: first, $options: "i" } },
-      { lastName: { $regex: last, $options: "i" } },
-    ];
-  }
-}
+    if (name?.trim()) {
+      const parts = name.trim().split(/\s+/);
+      if (parts.length === 1) {
+        filter.$or = [
+          { firstName: { $regex: parts[0], $options: "i" } },
+          { lastName: { $regex: parts[0], $options: "i" } },
+        ];
+      } else {
+        const first = parts[0];
+        const last = parts.slice(1).join(" ");
+        filter.$and = [
+          { firstName: { $regex: first, $options: "i" } },
+          { lastName: { $regex: last, $options: "i" } },
+        ];
+      }
+    }
 
-    
     if (fromDate || toDate) {
       filter.createdAt = {};
       if (fromDate) filter.createdAt.$gte = new Date(fromDate);
       if (toDate) {
         const end = new Date(toDate);
-        end.setHours(23, 59, 59, 999); 
+        end.setHours(23, 59, 59, 999);
         filter.createdAt.$lte = end;
       }
     }
-
 
     const [employee, totalEmployeeCount] = await Promise.all([
       Employee.find(
@@ -189,6 +210,7 @@ export const getEmployeeById = async (req, res) => {
       organizationId: req?.organization?.id,
     })
       .populate("assignedHeadQuarters", "headQuarterName _id")
+      .populate("assignedZones", "name _id")
       .select("-password -__v -updatedAt");
 
     if (!employee) {
@@ -198,12 +220,24 @@ export const getEmployeeById = async (req, res) => {
       });
     }
 
-    const hqIds = employee.assignedHeadQuarters.map((hq) => hq._id);
+    let assignedAreas = [];
 
-    const assignedAreas = await Area.find(
-      { headQuarterId: { $in: hqIds }, organizationId: req?.organization?.id },
-      { name: 1, _id: 1 },
-    );
+    if (employee.role === "zonalManager") {
+      const zoneIds = employee.assignedZones.map((z) => z._id);
+      assignedAreas = await Area.find(
+        { zoneId: { $in: zoneIds }, organizationId: req?.organization?.id },
+        { name: 1, _id: 1 },
+      );
+    } else {
+      const hqIds = employee.assignedHeadQuarters.map((hq) => hq._id);
+      assignedAreas = await Area.find(
+        {
+          headQuarterId: { $in: hqIds },
+          organizationId: req?.organization?.id,
+        },
+        { name: 1, _id: 1 },
+      );
+    }
 
     const areaIds = assignedAreas.map((a) => a._id);
 
@@ -239,6 +273,7 @@ export const updateEmployee = async (req, res) => {
       "phoneNumber",
       "role",
       "assignedHeadQuarters",
+      "assignedZones",
       "assignedAreas",
       "assignedDoctors",
       "isActive",
@@ -368,15 +403,19 @@ export const getAssignedDoctorAndArea = async (req, res) => {
   try {
     // here we are expecting the employee details in the req object so pls ensure to use auth middleware
 
-    const areas = await Area.find(
-      {
-        headQuarterId: { $in: req?.employee?.assignedHeadQuarters },
-      },
-      {
-        _id: 1,
-        name: 1,
-      },
-    );
+    let areas;
+
+    if (req?.employee?.role === "zonalManager") {
+      areas = await Area.find(
+        { zoneId: { $in: req?.employee?.assignedZones } },
+        { _id: 1, name: 1 },
+      );
+    } else {
+      areas = await Area.find(
+        { headQuarterId: { $in: req?.employee?.assignedHeadQuarters } },
+        { _id: 1, name: 1 },
+      );
+    }
 
     const areaId = areas.map((area) => area._id);
 
@@ -406,8 +445,6 @@ export const getAssignedDoctorAndArea = async (req, res) => {
     });
   }
 };
-
-
 export const forgotPassword = async (req, res) => {
   try {
     const { userName } = req.body;
@@ -421,46 +458,45 @@ export const forgotPassword = async (req, res) => {
 
     const employee = await Employee.findOne({ userName: userName.trim() });
 
-    
     if (!employee) {
       return res.status(200).json({
         success: true,
-        message: "If this username exists, a reset link has been sent to the registered email.",
+        message:
+          "If this username exists, a reset link has been sent to the registered email.",
       });
     }
 
     if (!employee.isActive) {
       return res.status(403).json({
         success: false,
-        message: "Your account is deactivated. Please contact your administrator.",
+        message:
+          "Your account is deactivated. Please contact your administrator.",
       });
     }
 
-    
     const rawToken = crypto.randomBytes(32).toString("hex");
-    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(rawToken)
+      .digest("hex");
 
-    
     employee.resetPasswordToken = hashedToken;
-    employee.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); 
+    employee.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
     await employee.save({ validateBeforeSave: false });
 
-    
     const resetUrl = `${process.env.FRONTEND_URL}/reportet/employee/reset-password/${rawToken}`;
 
     try {
       // await sendMail(
-      //   "passwordReset",           
+      //   "passwordReset",
       //   resetUrl,
       //   null,
       //   [{ email: employee.email, name: employee.displayName }],
       // );
-      await sendForgotPasswordMail(
-  resetUrl,
-  [{ email: employee.email, name: employee.displayName }]
-);
+      await sendForgotPasswordMail(resetUrl, [
+        { email: employee.email, name: employee.displayName },
+      ]);
     } catch (mailError) {
-      
       employee.resetPasswordToken = null;
       employee.resetPasswordExpires = null;
       await employee.save({ validateBeforeSave: false });
@@ -474,7 +510,8 @@ export const forgotPassword = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "If this username exists, a reset link has been sent to the registered email.",
+      message:
+        "If this username exists, a reset link has been sent to the registered email.",
     });
   } catch (error) {
     console.error("Forgot password error:", error);
@@ -511,33 +548,131 @@ export const resetPassword = async (req, res) => {
       });
     }
 
-    
     const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
     const employee = await Employee.findOne({
       resetPasswordToken: hashedToken,
-      resetPasswordExpires: { $gt: new Date() }, 
+      resetPasswordExpires: { $gt: new Date() },
     });
 
     if (!employee) {
       return res.status(400).json({
         success: false,
-        message: "Reset link is invalid or has expired. Please request a new one.",
+        message:
+          "Reset link is invalid or has expired. Please request a new one.",
       });
     }
 
-    
     employee.password = newPassword;
     employee.resetPasswordToken = null;
     employee.resetPasswordExpires = null;
-    await employee.save(); 
+    await employee.save();
 
     res.status(200).json({
       success: true,
-      message: "Password reset successful. You can now log in with your new password.",
+      message:
+        "Password reset successful. You can now log in with your new password.",
     });
   } catch (error) {
     console.error("Reset password error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
+  }
+};
+
+export const getSuperiors = async (req, res) => {
+  try {
+    if (!req?.employee) {
+      res.status(403).json({
+        success: false,
+        message: "Sorry you are not employee",
+      });
+      return;
+    }
+    const role = req?.employee?.role;
+    const organizationId = req?.employee?.organizationId;
+    const subordinateRoles = getSubordinateRoles(role);
+
+    const filter = {
+      organizationId: organizationId,
+      role: { $nin: subordinateRoles },
+    };
+
+    if (role === "zonalManager") {
+      const employeeZones = req?.employee?.assignedZones?.toObject?.() ?? [];
+      filter.assignedZones = { $all: employeeZones };
+    } else {
+      const employeeHeadQuarters =
+        req?.employee?.assignedHeadQuarters?.toObject?.() ?? [];
+      filter.assignedHeadQuarters = { $all: employeeHeadQuarters };
+    }
+
+    const superiorList = await Employee.find(filter, {
+      firstName: 1,
+      lastName: 1,
+      role: 1,
+    }).lean();
+
+    res.status(200).json({
+      success: true,
+      data: superiorList,
+    });
+  } catch (error) {
+    console.error("Error in geting superiors:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
+  }
+};
+
+export const getSubordinates = async (req, res) => {
+  try {
+    if (!req?.employee) {
+      res.status(403).json({
+        success: false,
+        message: "Sorry you are not employee",
+      });
+      return;
+    }
+    const role = req?.employee?.role;
+    const organizationId = req?.employee?.organizationId;
+    const superiorRoles = getSuperiorRoles(role);
+
+    const filter = {
+      organizationId: organizationId,
+      role: { $nin: superiorRoles },
+    };
+
+    if (role === "zonalManager") {
+      const employeeZones = req?.employee?.assignedZones?.toObject?.() ?? [];
+      filter.assignedZones = {
+        $not: { $elemMatch: { $nin: employeeZones } },
+        $ne: [],
+      };
+    } else {
+      const employeeHeadQuarters =
+        req?.employee?.assignedHeadQuarters?.toObject?.() ?? [];
+      filter.assignedHeadQuarters = {
+        $not: { $elemMatch: { $nin: employeeHeadQuarters } },
+        $ne: [],
+      };
+    }
+
+    const subordinateList = await Employee.find(filter, {
+      firstName: 1,
+      lastName: 1,
+      role: 1,
+    }).lean();
+
+    res.status(200).json({
+      success: true,
+      data: subordinateList,
+    });
+  } catch (error) {
+    console.error("Error in geting subordinates", error);
     res.status(500).json({
       success: false,
       message: "Server error. Please try again later.",
