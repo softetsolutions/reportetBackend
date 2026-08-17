@@ -7,7 +7,11 @@ const saleSchema = new mongoose.Schema(
       refPath: "saleByModel",
       required: true,
     },
-   
+    saleByModel: {
+      type: String,
+      enum: ["Organization", "Employee"],
+      required: true,
+    },
     stockist: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Stockist",
@@ -41,13 +45,6 @@ const saleSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
-
-
-saleSchema.virtual("saleByModel").get(function () {
-  return String(this.saleBy) === String(this.organizationId)
-    ? "Organization"
-    : "Employee";
-});
 
 saleSchema.index(
   { organizationId: 1, saleBy: 1, month: 1, year: 1, stockist: 1 },

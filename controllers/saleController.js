@@ -136,14 +136,22 @@ export const getSalesListOfEmployee = async (req, res) => {
 
 export const getAllSales = async (req, res) => {
   try {
-    let { employeeId, months, years, pageNo = 1, limit = 10 } = req?.body;
+    let {
+      employeeId,
+      months,
+      years,
+      isAdmin = false,
+      pageNo = 1,
+      limit = 10,
+    } = req?.body;
 
     pageNo = Number(req.body.pageNo) || 1;
     limit = Number(req.body.limit) || 5;
 
     const filter = {
       organizationId: req?.organization?.id,
-      ...(employeeId && { saleBy: employeeId }),
+      ...(employeeId && !isAdmin && { saleBy: employeeId }),
+      ...(isAdmin && { saleBy: req?.organization?.id }),
       ...(months && months.length > 0 && { month: { $in: months } }),
     };
 
@@ -174,7 +182,7 @@ export const getAllSales = async (req, res) => {
           limit,
         },
       )
-        .populate("saleBy", "_id firstName lastName role")
+        .populate("saleBy", "_id firstName lastName role organizationName ")
         .populate("stockist", "_id name"),
       Sale.countDocuments(filter),
     ]);
