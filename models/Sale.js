@@ -4,7 +4,12 @@ const saleSchema = new mongoose.Schema(
   {
     saleBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Employee",
+      refPath: "saleByModel",
+      required: true,
+    },
+    saleByModel: {
+      type: String,
+      enum: ["Organization", "Employee"],
       required: true,
     },
     stockist: {
