@@ -67,18 +67,6 @@ export async function sendMail(subject, userName, password, to) {
                 Please sign in to the application and start reporting.
               </p>
 
-              <!-- Button -->
-              <!--<table cellpadding="0" cellspacing="0" style="margin-top:30px;">-->
-              <!--  <tr>-->
-              <!--    <td align="center" bgcolor="#2563eb" style="border-radius:6px;">-->
-              <!--      <a href="https://yourapp.com/login"-->
-              <!--         style="display:inline-block; padding:14px 28px; color:#ffffff; text-decoration:none; font-size:16px; font-weight:bold;">-->
-              <!--        Login to App-->
-              <!--      </a>-->
-              <!--    </td>-->
-              <!--  </tr>-->
-              <!--</table>-->
-
               <p style="font-size:14px; color:#6b7280; margin-top:40px;">
                 If you face any issues while logging in, please contact the administrator.
               </p>
@@ -105,14 +93,8 @@ export async function sendMail(subject, userName, password, to) {
       to: to,
     });
   } catch (err) {
-    if (err instanceof UnauthorizedError) {
-      console.error("Invalid API key");
-    } else if (err instanceof TooManyRequestsError) {
-      const retryAfter = err.rawResponse.headers["retry-after"];
-      console.error(`Rate limited. Retry after ${retryAfter}s`);
-    } else if (err instanceof BrevoError) {
-      console.error(`API error ${err.statusCode}:`, err.message);
-    }
+    console.error("Failed to send mail:", err);
+    throw err;
   }
 }
 
