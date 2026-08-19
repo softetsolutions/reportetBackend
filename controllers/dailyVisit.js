@@ -264,6 +264,80 @@ export const deleteDailyVisit = async (req, res) => {
   }
 };
 
+async function resolveEmployeeScope(employee) {
+  const {
+    _id,
+    role,
+    organizationId,
+    assignedHeadQuarters = [],
+    assignedZones = [],
+  } = employee;
+
+  if (role === "mr") {
+    return {
+      restrictEmployeeIds: [_id],
+      restrictHeadQuarterIds: assignedHeadQuarters.length
+        ? assignedHeadQuarters
+        : undefined,
+    };
+  }
+
+  if (role === "areaManager") {
+    const hqIds = assignedHeadQuarters;
+
+    const subordinates = await mongoose
+      .model("Employee")
+      .find(
+        {
+          organizationId,
+          role: "mr",
+          assignedHeadQuarters: { $in: hqIds },
+        },
+        { _id: 1 },
+      )
+      .lean();
+
+    return {
+      restrictEmployeeIds: [_id, ...subordinates.map((s) => s._id)],
+      restrictHeadQuarterIds: hqIds.length ? hqIds : undefined,
+    };
+  }
+
+  if (role === "zonalManager") {
+    const zoneIds = assignedZones;
+
+    const headquarters = await mongoose
+      .model("Headquarter")
+      .find({ zoneId: { $in: zoneIds } }, { _id: 1 })
+      .lean();
+    const hqIds = headquarters.map((h) => h._id);
+
+    const subordinates = await mongoose
+      .model("Employee")
+      .find(
+        {
+          organizationId,
+          role: { $in: ["mr", "areaManager"] },
+          assignedHeadQuarters: { $in: hqIds },
+        },
+        { _id: 1 },
+      )
+      .lean();
+
+    return {
+      restrictEmployeeIds: [_id, ...subordinates.map((s) => s._id)],
+      restrictHeadQuarterIds: hqIds.length ? hqIds : undefined,
+    };
+  }
+
+  return {
+    restrictEmployeeIds: [_id],
+    restrictHeadQuarterIds: assignedHeadQuarters.length
+      ? assignedHeadQuarters
+      : undefined,
+  };
+}
+
 export const getDoctorVisitReport = async (req, res) => {
   try {
     const {
