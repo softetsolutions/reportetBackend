@@ -9,6 +9,9 @@ const orgSchema = new mongoose.Schema(
     code: { type: String, unique: true, required: true },
     brandName: { type: String, default: "ReportET" },
     logoUrl: { type: String, default: null },
+
+    liveTrackingEnabled: { type: Boolean, default: false },
+    liveTrackingEnabledAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

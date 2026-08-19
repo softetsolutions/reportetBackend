@@ -19,6 +19,7 @@ import brandingRoutes from "./routes/logoRoutes.js";
 import leaveRoutes from "./routes/leaveRoutes.js";
 import budgetRoutes from "./routes/headQuarterBudgetRoutes.js";
 import zoneRoutes from "./routes/zoneRoutes.js";
+import trackingRoutes from "./routes/tracking.routes.js";
 import swaggerUi from "swagger-ui-express";
 import yaml from "yamljs";
 
@@ -67,5 +68,5 @@ app.use("/api/leaves", leaveRoutes);
 app.use("/api/logo", brandingRoutes);
 app.use("/api/budget", budgetRoutes);
 app.use("/api/zone", zoneRoutes);
-
+app.use("/api/tracking", trackingRoutes);
 export default app;

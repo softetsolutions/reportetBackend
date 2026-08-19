@@ -11,6 +11,8 @@ const employeeSchema = new mongoose.Schema(
     email: { type: String, required: true },
     phoneNumber: { type: Number, required: true },
     password: { type: String, required: true },
+
+    liveTrackingEnabled: { type: Boolean, default: false },
     displayName: {
       type: String,
       default: function () {

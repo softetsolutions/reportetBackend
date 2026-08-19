@@ -2,7 +2,6 @@ import jwt from "jsonwebtoken";
 import Employee from "../models/Employee.js";
 import Organization from "../models/Organization.js";
 
-//Employee Auth Middleware
 export const auth = async (req, res, next) => {
   try {
     const token =
