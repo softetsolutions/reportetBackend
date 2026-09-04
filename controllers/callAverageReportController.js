@@ -38,6 +38,39 @@ function getMonthYearRange(startDate, endDate) {
   return result;
 }
 
+function countSundaysExcludingLeave(employmentStart, rangeEnd, leaves) {
+  if (employmentStart > rangeEnd) return 0;
+
+  let cursor = new Date(
+    Date.UTC(
+      employmentStart.getUTCFullYear(),
+      employmentStart.getUTCMonth(),
+      employmentStart.getUTCDate(),
+    ),
+  );
+  const endDay = new Date(
+    Date.UTC(
+      rangeEnd.getUTCFullYear(),
+      rangeEnd.getUTCMonth(),
+      rangeEnd.getUTCDate(),
+    ),
+  );
+
+  let sundayCount = 0;
+  while (cursor <= endDay) {
+    if (cursor.getUTCDay() === 0) {
+      const onLeave = leaves.some((leave) => {
+        const leaveStart = new Date(leave.startDate);
+        const leaveEnd = new Date(leave.endDate);
+        return cursor >= leaveStart && cursor <= leaveEnd;
+      });
+      if (!onLeave) sundayCount++;
+    }
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return sundayCount;
+}
+
 async function buildCallAverageReportData({
   organizationId,
   startDate,
@@ -94,6 +127,13 @@ async function buildCallAverageReportData({
   ].map((id) => new mongoose.Types.ObjectId(id));
 
   const visitStats = await DailyVisit.aggregate([
+    // {
+    //   $match: {
+    //     organizationId: orgObjectId,
+    //     employeeId: { $in: employeeIds },
+    //     visitDate: { $gte: rangeStart, $lte: rangeEnd },
+    //   },
+    // },
     {
       $match: {
         organizationId: orgObjectId,
@@ -184,12 +224,11 @@ async function buildCallAverageReportData({
     const totalSale = saleStatsMap.get(emp._id.toString()) || 0;
 
     const empJoinDate = new Date(emp.createdAt);
-    const employmentStart = empJoinDate;
+    const employmentStart = empJoinDate > rangeStart ? empJoinDate : rangeStart;
     const totalWorkableDays =
       employmentStart > rangeEnd
         ? 0
         : Math.floor((rangeEnd - employmentStart) / (1000 * 60 * 60 * 24)) + 1;
-
     const empLeaves = leavesByEmployee.get(emp._id.toString()) || [];
     let leaveDays = 0;
     for (const leave of empLeaves) {
@@ -204,7 +243,13 @@ async function buildCallAverageReportData({
       }
     }
 
-    const workDays = Math.max(totalWorkableDays - leaveDays, 0);
+    //const workDays = Math.max(totalWorkableDays - leaveDays, 0);
+    const sundayCount = countSundaysExcludingLeave(
+      employmentStart,
+      rangeEnd,
+      empLeaves,
+    );
+    const workDays = Math.max(totalWorkableDays - leaveDays - sundayCount, 0);
 
     const hqIds = (emp.assignedHeadQuarters || []).map((h) => h._id.toString());
     const doctorUniverse = new Set(

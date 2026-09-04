@@ -4,6 +4,13 @@ import ExcelJS from "exceljs";
 import Area from "../models/Area.js";
 import { getCellStringValue } from "../utils/helperFunction.js";
 
+function computeBirthdayMonthDay(dob) {
+  if (!dob) return null;
+  const parsed = new Date(dob);
+  if (isNaN(parsed.getTime())) return null;
+  return `${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+}
+
 export const addDoctor = async (req, res) => {
   try {
     // const sampleDoctorDataStructure = {
@@ -22,6 +29,7 @@ export const addDoctor = async (req, res) => {
       organizationId: req?.organization._id,
       areaId: doctorData[doctor]?.areaId,
       dob: doctorData[doctor]?.dob,
+      birthdayMonthDay: computeBirthdayMonthDay(doctorData[doctor]?.dob),
       email: doctorData[doctor]?.email,
       phoneNumber: doctorData[doctor]?.phoneNumber,
     }));
@@ -211,6 +219,7 @@ export const importDoctorsFromExcel = async (req, res) => {
         name: doctorName,
         specialty: speciality,
         dob,
+        birthdayMonthDay: computeBirthdayMonthDay(dob),
         email,
         phoneNumber,
         areaId: areaName,
@@ -401,6 +410,10 @@ export const editDoctor = async (req, res) => {
     if (name) updateFields.name = name;
     if (specialty) updateFields.specialty = specialty;
     if (areaId) updateFields.areaId = areaId;
+    if (dob !== undefined) {
+      updateFields.dob = dob;
+      updateFields.birthdayMonthDay = computeBirthdayMonthDay(dob);
+    }
     if (dob !== undefined) updateFields.dob = dob;
     if (email !== undefined) updateFields.email = email;
     if (phoneNumber !== undefined) updateFields.phoneNumber = phoneNumber;
