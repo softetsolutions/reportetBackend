@@ -98,7 +98,7 @@ async function buildCallAverageReportData({
       $match: {
         organizationId: orgObjectId,
         employeeId: { $in: employeeIds },
-        visitDate: { $gte: startDate, $lte: endDate },
+        visitDate: { $gte: rangeStart, $lte: rangeEnd },
       },
     },
     {
@@ -184,12 +184,11 @@ async function buildCallAverageReportData({
     const totalSale = saleStatsMap.get(emp._id.toString()) || 0;
 
     const empJoinDate = new Date(emp.createdAt);
-    const employmentStart = empJoinDate;
+    const employmentStart = empJoinDate > rangeStart ? empJoinDate : rangeStart;
     const totalWorkableDays =
       employmentStart > rangeEnd
         ? 0
         : Math.floor((rangeEnd - employmentStart) / (1000 * 60 * 60 * 24)) + 1;
-
     const empLeaves = leavesByEmployee.get(emp._id.toString()) || [];
     let leaveDays = 0;
     for (const leave of empLeaves) {
