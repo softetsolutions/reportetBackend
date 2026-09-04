@@ -21,6 +21,7 @@ import budgetRoutes from "./routes/headQuarterBudgetRoutes.js";
 import zoneRoutes from "./routes/zoneRoutes.js";
 import swaggerUi from "swagger-ui-express";
 import yaml from "yamljs";
+import notificationRoutes from "./routes/notificationsRoute.js";
 
 dotenv.config();
 const app = express();
@@ -67,5 +68,6 @@ app.use("/api/leaves", leaveRoutes);
 app.use("/api/logo", brandingRoutes);
 app.use("/api/budget", budgetRoutes);
 app.use("/api/zone", zoneRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 export default app;

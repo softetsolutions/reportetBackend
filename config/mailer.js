@@ -214,3 +214,137 @@ Thank you,<br>
     throw err;
   }
 }
+
+function buildBirthdayEmailHtml({ template = {}, doctorName, message }) {
+  const isCustom = template.mode === "custom";
+  const accent = template.accentColor || "#111827";
+  const heading =
+    isCustom && template.headerText
+      ? template.headerText
+      : "🎂 Birthday Reminder";
+  const footer =
+    isCustom && template.footerText
+      ? template.footerText
+      : "© 2026 Softet Solutions. All rights reserved.";
+
+  const defaultGreetingText = (name) =>
+    `Happy Birthday, Dr. ${name}! Wishing you a wonderful year ahead.`;
+
+  const bodyMsg =
+    message ||
+    (isCustom && template.bodyMessage) ||
+    defaultGreetingText(doctorName);
+
+  const logoBlock =
+    isCustom && template.logoUrl
+      ? `<tr><td align="center" style="padding:24px 0 0;"><img src="${template.logoUrl}" alt="Logo" style="max-height:56px;" /></td></tr>`
+      : "";
+
+  const hasBackground = isCustom && template.backgroundImageUrl;
+  const bodyBgColor = (isCustom && template.bodyBackgroundColor) || "#ffffff";
+  const hasBodyBackground = isCustom && template.bodyBackgroundImageUrl;
+
+  const headerCellOpen = hasBackground
+    ? `<td style="background-color:${accent};background-image:url('${template.backgroundImageUrl}');background-size:cover;background-position:center;padding:20px;text-align:center;">
+        <!--[if gte mso 9]>
+        <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:600px;height:120px;">
+          <v:fill type="tile" src="${template.backgroundImageUrl}" color="${accent}" />
+          <v:textbox inset="0,0,0,0">
+        <![endif]-->
+        <div>`
+    : `<td style="background:${accent};padding:20px;text-align:center;">`;
+
+  const headerCellClose = hasBackground
+    ? `</div>
+        <!--[if gte mso 9]>
+          </v:textbox>
+        </v:rect>
+        <![endif]-->
+      </td>`
+    : `</td>`;
+
+  const bodyCellOpen = hasBodyBackground
+    ? `<td style="background-color:${bodyBgColor};background-image:url('${template.bodyBackgroundImageUrl}');background-size:cover;background-position:center;padding:40px 30px;color:#333;">
+        <!--[if gte mso 9]>
+        <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:600px;">
+          <v:fill type="tile" src="${template.bodyBackgroundImageUrl}" color="${bodyBgColor}" />
+          <v:textbox inset="0,0,0,0">
+        <![endif]-->
+        <div>`
+    : `<td style="background-color:${bodyBgColor};padding:40px 30px;color:#333;">`;
+
+  const bodyCellClose = hasBodyBackground
+    ? `</div>
+        <!--[if gte mso 9]>
+          </v:textbox>
+        </v:rect>
+        <![endif]-->
+      </td>`
+    : `</td>`;
+
+  return `
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8" /><title>Birthday Reminder</title></head>
+<body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;">
+${logoBlock}
+<tr>
+${headerCellOpen}
+<h1 style="color:#fff;margin:0;font-size:24px;">${heading}</h1>
+${headerCellClose}
+</tr>
+<tr>
+${bodyCellOpen}
+<p style="font-size:16px;line-height:24px;margin-bottom:30px;">${bodyMsg}</p>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:20px;">
+<tr><td style="padding:10px 0;font-size:15px;"><strong>Doctor:</strong> Dr. ${doctorName}</td></tr>
+</table>
+${bodyCellClose}
+</tr>
+<tr>
+<td style="background:#f3f4f6;padding:20px;text-align:center;font-size:13px;color:#6b7280;">${footer}</td>
+</tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
+}
+
+export async function sendBirthdayMail(
+  subject,
+  doctorName,
+  message,
+  to,
+  template,
+) {
+  if (!to || typeof to !== "string" || !to.includes("@")) {
+    const err = new Error(`Invalid recipient email address: "${to}"`);
+    console.error("Failed to send birthday mail:", err.message);
+    throw err;
+  }
+
+  try {
+    const response = await brevo.transactionalEmails.sendTransacEmail({
+      subject,
+      htmlContent: buildBirthdayEmailHtml({ template, doctorName, message }),
+      sender: { name: "Reportet", email: "support@softetsolutions.com" },
+      to: [{ email: to, name: doctorName || "" }],
+    });
+
+    console.log(
+      `Birthday mail accepted by Brevo for ${to}. messageId: ${
+        response?.body?.messageId || response?.messageId || "unknown"
+      }`,
+    );
+
+    return response;
+  } catch (err) {
+    console.error(
+      `Failed to send birthday mail to ${to}:`,
+      err?.response?.body || err?.message || err,
+    );
+    throw err;
+  }
+}

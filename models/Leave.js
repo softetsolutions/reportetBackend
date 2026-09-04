@@ -25,7 +25,7 @@ const leaveSchema = new mongoose.Schema(
       enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
-   
+
     actionBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
