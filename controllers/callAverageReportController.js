@@ -94,11 +94,18 @@ async function buildCallAverageReportData({
   ].map((id) => new mongoose.Types.ObjectId(id));
 
   const visitStats = await DailyVisit.aggregate([
+    // {
+    //   $match: {
+    //     organizationId: orgObjectId,
+    //     employeeId: { $in: employeeIds },
+    //     visitDate: { $gte: rangeStart, $lte: rangeEnd },
+    //   },
+    // },
     {
       $match: {
         organizationId: orgObjectId,
         employeeId: { $in: employeeIds },
-        visitDate: { $gte: rangeStart, $lte: rangeEnd },
+        visitDate: { $gte: startDate, $lte: endDate },
       },
     },
     {
