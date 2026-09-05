@@ -1,8 +1,8 @@
 openapi: 3.0.0
 info:
-  title: REPORTET APIS
-  version: 1.0.0
-  description: API documentation 
+  title: ReportET API
+  version: 1.1.0
+  description: Multi-tenant pharma field-ops API. Employee tokens use `typ: employee`; organization tokens use `typ: org`.
 servers:
   - url: http://localhost:5000
     description: Local server
@@ -13,803 +13,940 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
 
+security:
+  - bearerAuth: []
 
-# Area routes
 paths:
-  /api/area/add:
-    post:
-      tags:
-        - Area
-      summary: Add multiple areas
-      description: Accepts an array of area names and adds them if they don't already exist for the organization.
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - names
-              properties:
-                names:
-                  type: array
-                  items:
-                    type: string
-                  example: ["Delhi", "Mumbai", "Chennai"]
-      responses:
-        '201':
-          description: Areas processed successfully
-        '400':
-          description: Invalid input or duplicate entries
-        '500':
-          description: Server error
-
-  /api/area/assign:
-    post:
-      tags:
-        - Area
-      summary: Assign an area to an MR
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - mrId
-                - areaId
-              properties:
-                mrId:
-                  type: string
-                  example: 64f82cda2e5a0f0011e29ba4
-                areaId:
-                  type: string
-                  example: 64f82cda2e5a0f0011e29a67
-      responses:
-        '200':
-          description: Area assigned successfully
-        '400':
-          description: Missing mrId or areaId
-        '404':
-          description: MR not found
-        '500':
-          description: Server error
-
-  /api/area:
+  /ping:
     get:
-      tags:
-        - Area
-      summary: Get all areas for the organization
-      security:
-        - bearerAuth: []
+      tags: [Health]
+      security: []
+      summary: Liveness check
       responses:
-        '200':
-          description: List of areas
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Area'
-        '404':
-          description: No areas found
-        '500':
-          description: Server error
-
-  /api/area/{id}:
-    get:
-      tags:
-        - Area
-      summary: Get area by ID
-      security:
-        - bearerAuth: []
-      parameters:
-        - in: path
-          name: id
-          schema:
-            type: string
-          required: true
-          description: Area ID
-      responses:
-        '200':
-          description: Area found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Area'
-        '404':
-          description: Area not found
-        '500':
-          description: Server error
-
-  /api/area/import:
-    post:
-      tags:
-        - Area
-      summary: Import areas from Excel file
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required:
-                - file
-              properties:
-                file:
-                  type: string
-                  format: binary
-      responses:
-        '200':
-          description: Areas imported successfully
-        '500':
-          description: Failed to import areas
-
-
-#auth routes
+        "200":
+          description: Server is up
 
   /api/auth/login:
     post:
-      summary: Login user (MR)
-      tags:
-        - Auth
+      tags: [Auth]
+      security: []
+      summary: Employee login
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-                - userName
-                - password
+              required: [userName, password]
               properties:
-                userName:
-                  type: string
-                  example: mr123
-                password:
-                  type: string
-                  example: yourpassword
+                userName: { type: string }
+                password: { type: string }
       responses:
         "200":
-          description: Login successful
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                  token:
-                    type: string
+          description: JWT with typ employee; no expiry (mobile long-lived session)
         "401":
           description: Invalid credentials
-        "500":
-          description: Server error
+        "403":
+          description: Account deactivated
 
   /api/auth/logout:
     post:
-      summary: Logout user
-      tags:
-        - Auth
+      tags: [Auth]
+      security: []
+      summary: Clear employee token cookie
       responses:
         "200":
-          description: Logout successful
-        "500":
-          description: Server error
+          description: Logged out
 
-# Daily Visits routes
-  paths:
-  /daily-visit/create:
+  /api/orgauth/register:
     post:
-      tags:
-        - DailyVisit
-      summary: Create a daily visit
-      description: Creates a new daily visit record for the authenticated MR.
-      security:
-        - bearerAuth: []
+      tags: [Org Auth]
+      security: []
+      summary: Register an organization
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [organizationName, email, password]
               properties:
-                date:
-                  type: string
-                  format: date
-                  example: "2025-08-07"
-                areaId:
-                  type: string
-                  example: "64c73a5bdbf2394a9987cd12"
-                doctorId:
-                  type: string
-                  example: "64d6e87a4adff4541b9a6fc3"
-                remark:
-                  type: string
-                  example: "Discussed medication updates"
-              required:
-                - date
-                - areaId
-                - doctorId
-                - remark
+                organizationName: { type: string }
+                email: { type: string }
+                password: { type: string }
       responses:
-        '201':
-          description: Daily visit created successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: Daily visit created successfully
-                  dailyVisit:
-                    $ref: '#/components/schemas/DailyVisit'
-        '400':
-          description: Validation error
-        '500':
-          description: Server error
+        "201":
+          description: Organization created
 
-# doctor routes
-  paths:
+  /api/orgauth/login:
+    post:
+      tags: [Org Auth]
+      security: []
+      summary: Organization login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: JWT with typ org, expires in 7 days
+
+  /api/employee/create:
+    post:
+      tags: [Employee]
+      summary: Onboard an employee
+      responses:
+        "200":
+          description: Employee created
+
+  /api/employee/getAllEmployees:
+    post:
+      tags: [Employee]
+      summary: Paginated employee list
+      responses:
+        "200":
+          description: Employee page
+
+  /api/employee/getAllEmployeeOptions:
+    get:
+      tags: [Employee]
+      summary: Employee dropdown options
+      responses:
+        "200":
+          description: Options
+
+  /api/employee/getAssignedDetails:
+    get:
+      tags: [Employee]
+      summary: Assigned areas and doctors for the logged-in employee
+      responses:
+        "200":
+          description: Areas and doctors scoped to the employee org
+
+  /api/employee/getSuperiors:
+    get:
+      tags: [Employee]
+      summary: Superiors of the logged-in employee
+      responses:
+        "200":
+          description: Superiors
+
+  /api/employee/getSubordinates:
+    get:
+      tags: [Employee]
+      summary: Subordinates of the logged-in employee
+      responses:
+        "200":
+          description: Subordinates
+
+  /api/employee/call-average:
+    get:
+      tags: [Employee]
+      summary: Call average report
+      responses:
+        "200":
+          description: Report
+
+  /api/employee/call-average/export:
+    get:
+      tags: [Employee]
+      summary: Export call average report
+      responses:
+        "200":
+          description: Excel file
+
+  /api/employee/forgot-password:
+    post:
+      tags: [Employee]
+      security: []
+      summary: Request a password reset email
+      responses:
+        "200":
+          description: Generic success message
+
+  /api/employee/reset-password/{token}:
+    post:
+      tags: [Employee]
+      security: []
+      summary: Reset password with emailed token
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Password updated
+
+  /api/employee/{employeeId}:
+    get:
+      tags: [Employee]
+      summary: Get employee by id
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Employee
+    patch:
+      tags: [Employee]
+      summary: Update employee
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+
+  /api/area/add:
+    post:
+      tags: [Area]
+      summary: Add areas
+      responses:
+        "201":
+          description: Areas inserted
+
+  /api/area:
+    post:
+      tags: [Area]
+      summary: Paginated area list
+      responses:
+        "200":
+          description: Areas
+
+  /api/area/import:
+    post:
+      tags: [Area]
+      summary: Import areas from Excel
+      responses:
+        "200":
+          description: Import result
+
+  /api/area/headquarter/{id}:
+    get:
+      tags: [Area]
+      summary: Areas in a headquarter
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Areas
+
+  /api/area/employee:
+    post:
+      tags: [Area]
+      summary: Assigned areas for an employee
+      responses:
+        "200":
+          description: Areas for assigned headquarters
+
+  /api/area/{id}:
+    get:
+      tags: [Area]
+      summary: Get area by id (org-scoped)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Area
+        "404":
+          description: Not found in this organization
+    put:
+      tags: [Area]
+      summary: Edit area
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+    delete:
+      tags: [Area]
+      summary: Delete area. Pass force=true to also delete org-scoped doctors.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: force
+          schema: { type: string, enum: ["true"] }
+      responses:
+        "200":
+          description: Deleted
+        "409":
+          description: Linked doctors exist
+
+  /api/headQuarter/bulkuiadd:
+    post:
+      tags: [HeadQuarter]
+      summary: Create HQ / area / doctor hierarchy. organizationId is taken from the auth org, not the body.
+      responses:
+        "200":
+          description: Hierarchy created
+
+  /api/headQuarter/getPaginatedHeadQuarters:
+    post:
+      tags: [HeadQuarter]
+      summary: Paginated headquarters
+      responses:
+        "200":
+          description: Headquarters
+
+  /api/headQuarter/getAllHeadQuarterNames:
+    get:
+      tags: [HeadQuarter]
+      summary: Headquarter name options
+      responses:
+        "200":
+          description: Names
+
+  /api/headQuarter/employee:
+    post:
+      tags: [HeadQuarter]
+      summary: Headquarters assigned to the employee
+      responses:
+        "200":
+          description: Headquarters
+
+  /api/headQuarter/import:
+    post:
+      tags: [HeadQuarter]
+      summary: Import headquarters from Excel
+      responses:
+        "200":
+          description: Import result
+
+  /api/headQuarter/unassigned:
+    get:
+      tags: [HeadQuarter]
+      summary: Unassigned hierarchy
+      responses:
+        "200":
+          description: Unassigned nodes
+
+  /api/headQuarter/zones:
+    get:
+      tags: [HeadQuarter]
+      summary: Zone names for the org
+      responses:
+        "200":
+          description: Zones
+
+  /api/headQuarter/{headquarterId}:
+    put:
+      tags: [HeadQuarter]
+      summary: Edit headquarter
+      parameters:
+        - in: path
+          name: headquarterId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+    delete:
+      tags: [HeadQuarter]
+      summary: Delete headquarter
+      parameters:
+        - in: path
+          name: headquarterId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+
+  /api/headQuarter/{headquarterId}/assignments:
+    get:
+      tags: [HeadQuarter]
+      summary: Assignments for a headquarter
+      parameters:
+        - in: path
+          name: headquarterId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Assignments
+
+  /api/budget/meta/years:
+    get:
+      tags: [Budget]
+      summary: Configured financial years
+      responses:
+        "200":
+          description: Years
+
+  /api/budget:
+    get:
+      tags: [Budget]
+      summary: All headquarter budgets for a year
+      responses:
+        "200":
+          description: Budgets
+
+  /api/budget/{headQuarterId}:
+    get:
+      tags: [Budget]
+      summary: Budget for one headquarter
+      parameters:
+        - in: path
+          name: headQuarterId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Budget
+    put:
+      tags: [Budget]
+      summary: Set headquarter budget
+      parameters:
+        - in: path
+          name: headQuarterId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Saved
+    patch:
+      tags: [Budget]
+      summary: Update monthly budget
+      parameters:
+        - in: path
+          name: headQuarterId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+
+  /api/zone/getZoneOptions:
+    get:
+      tags: [Zone]
+      summary: Zone options
+      responses:
+        "200":
+          description: Zones
+
   /api/doctor/add:
     post:
-      tags:
-        - Doctor
-      summary: Add multiple doctors
-      description: Adds an array of doctors for the organization.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                doctors:
-                  type: array
-                  items:
-                    type: object
-                    required:
-                      - name
-                      - specialty
-                      - areaId
-                    properties:
-                      name:
-                        type: string
-                        example: "Dr. John Doe"
-                      specialty:
-                        type: string
-                        example: "Cardiology"
-                      areaId:
-                        type: string
-                        example: "64f0c1a302f4c7ae7e6b145a"
+      tags: [Doctor]
+      summary: Add doctors
       responses:
-        '201':
-          description: Doctors processed successfully
-        '400':
-          description: Validation error
-        '500':
-          description: Server error
+        "201":
+          description: Created
 
   /api/doctor/getAll:
-    get:
-      tags:
-        - Doctor
-      summary: Get all doctors
-      description: Retrieves all doctors for the authenticated organization.
+    post:
+      tags: [Doctor]
+      summary: Paginated doctor list
       responses:
-        '200':
-          description: List of doctors
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Doctor'
-        '404':
-          description: No doctors found
-        '500':
-          description: Server error
+        "200":
+          description: Doctors
 
   /api/doctor/getByAreaId/{areaId}:
     get:
-      tags:
-        - Doctor
-      summary: Get doctors by areaId
-      parameters:
-        - name: areaId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Area ID to filter doctors
-      responses:
-        '200':
-          description: List of doctors in the area
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Doctor'
-        '404':
-          description: No doctors found for this area
-        '500':
-          description: Server error
-
-  /api/doctor/assignToMR:
-    post:
-      tags:
-        - Doctor
-      summary: Assign a doctor to an MR
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - mrId
-                - doctorId
-              properties:
-                mrId:
-                  type: string
-                  example: "64f0c1a302f4c7ae7e6b145b"
-                doctorId:
-                  type: string
-                  example: "64f0c1a302f4c7ae7e6b145a"
-      responses:
-        '200':
-          description: MR updated successfully
-        '400':
-          description: Validation error
-        '404':
-          description: MR or Doctor not found
-        '500':
-          description: Server error
-
-  /api/doctor/import:
-    post:
-      tags:
-        - Doctor
-      summary: Import doctors from Excel file
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                file:
-                  type: string
-                  format: binary
-      responses:
-        '200':
-          description: Number of doctors imported
-        '500':
-          description: Server error
-
-
-  #mr routes
-  /api/mr/create:
-    post:
-      tags:
-        - MR
-      summary: Create a new MR
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - firstName
-                - lastName
-                - userName
-                - password
-              properties:
-                firstName:
-                  type: string
-                  example: "John"
-                lastName:
-                  type: string
-                  example: "Doe"
-                userName:
-                  type: string
-                  example: "johndoe123"
-                password:
-                  type: string
-                  example: "strongpassword123"
-      responses:
-        '201':
-          description: MR created successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Mr'
-        '400':
-          description: Missing fields or invalid input
-        '500':
-          description: Server error
-
-  /api/mr/getall:
-    get:
-      tags:
-        - MR
-      summary: Get all MRs for the organization
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: A list of MRs
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Mr'
-        '500':
-          description: Server error
-
-  /api/mr/getByAreaId/{areaId}:
-    get:
-      tags:
-        - MR
-      summary: Get MRs by area ID
-      security:
-        - bearerAuth: []
+      tags: [Doctor]
+      summary: Doctors in an area (org-scoped)
       parameters:
         - in: path
           name: areaId
           required: true
-          schema:
-            type: string
-          description: Area ID to filter MRs
+          schema: { type: string }
       responses:
-        '200':
-          description: MRs in the given area
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    _id:
-                      type: string
-                      example: "64ecf7d0724e9b10f2d8b9c3"
-                    displayName:
-                      type: string
-                      example: "John Doe"
-        '404':
-          description: No MRs found
-        '500':
-          description: Server error
+        "200":
+          description: Doctors
 
-
-  #organization routes
-  /api/orgauth/register:
+  /api/doctor/import:
     post:
-      tags:
-        - Organization
-      summary: Register a new organization
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - organizationName
-                - email
-                - password
-              properties:
-                organizationName:
-                  type: string
-                  example: Softet Solutions
-                email:
-                  type: string
-                  format: email
-                  example: admin@softetsolutions.com
-                password:
-                  type: string
-                  format: password
-                  example: strongpassword123
+      tags: [Doctor]
+      summary: Import doctors from Excel
       responses:
-        '201':
-          description: Organization registered successfully
-        '400':
-          description: Email already exists
-        '500':
-          description: Internal server error
+        "200":
+          description: Import result
 
-  /api/orgauth/login:
+  /api/doctor/export:
     post:
-      tags:
-        - Organization
-      summary: Login as organization admin
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - email
-                - password
-              properties:
-                email:
-                  type: string
-                  example: admin@softetsolutions.com
-                password:
-                  type: string
-                  example: strongpassword123
+      tags: [Doctor]
+      summary: Export doctors
       responses:
-        '200':
-          description: Login successful
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: Login successful
-                  token:
-                    type: string
-                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-        '401':
-          description: Invalid credentials
-        '500':
-          description: Server error
+        "200":
+          description: Excel file
 
-
-# sale routes
-  /api/sale:
-    post:
-      tags:
-        - Sale
-      summary: Create a new sale record
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - date
-                - stockist
-                - month
-                - saleAmount
-                - organizationId
-              properties:
-                date:
-                  type: string
-                  format: date
-                  example: "2025-08-07"
-                stockist:
-                  type: string
-                  example: "64f7a00e2e5a0f0011e28e00"
-                month:
-                  type: string
-                  example: "August"
-                saleAmount:
-                  type: number
-                  example: 12345
-                organizationId:
-                  type: string
-                  example: "64f79ffb2e5a0f0011e28df9"
-      responses:
-        '201':
-          description: Sale created successfully
-        '400':
-          description: Validation or creation error
-
-    get:
-      tags:
-        - Sale
-      summary: Get all sales (optional search by stockist name)
-      parameters:
-        - in: query
-          name: search
-          schema:
-            type: string
-          description: Search by stockist name (case-insensitive)
-      responses:
-        '200':
-          description: A list of sales
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Sale'
-        '500':
-          description: Server error
-
-  /api/sale/{id}:
+  /api/doctor/{doctorId}:
     put:
-      tags:
-        - Sale
-      summary: Update a sale record
+      tags: [Doctor]
+      summary: Edit doctor
       parameters:
         - in: path
-          name: id
+          name: doctorId
           required: true
-          schema:
-            type: string
-          description: Sale ID to update
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                date:
-                  type: string
-                  format: date
-                  example: "2025-08-07"
-                stockist:
-                  type: string
-                  example: "64f7a00e2e5a0f0011e28e00"
-                month:
-                  type: string
-                  example: "August"
-                saleAmount:
-                  type: number
-                  example: 54321
-                organizationId:
-                  type: string
-                  example: "64f79ffb2e5a0f0011e28df9"
+          schema: { type: string }
       responses:
-        '200':
-          description: Sale updated successfully
-        '400':
-          description: Update error
-
+        "200":
+          description: Updated
     delete:
-      tags:
-        - Sale
-      summary: Delete a sale record
+      tags: [Doctor]
+      summary: Delete doctor
       parameters:
         - in: path
-          name: id
+          name: doctorId
           required: true
-          schema:
-            type: string
-          description: Sale ID to delete
+          schema: { type: string }
       responses:
-        '200':
-          description: Sale deleted successfully
-        '400':
-          description: Deletion error
+        "200":
+          description: Deleted
 
-
-#stockist routes
-  /api/stockist:
+  /api/stockists:
     post:
-      tags:
-        - Stockist
-      summary: Create a new stockist
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - name
-              properties:
-                name:
-                  type: string
-                  example: MedCare Stockist
-                address:
-                  type: string
-                  example: 123 Main St, Delhi
-                state:
-                  type: string
-                  example: Delhi
-                gstNo:
-                  type: string
-                  example: GSTIN12345
+      tags: [Stockist]
+      summary: Create stockist
       responses:
-        '201':
-          description: Stockist created successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Stockist'
-        '400':
-          description: Validation or creation error
+        "201":
+          description: Created
 
+  /api/stockists/paginatedStockistList:
+    post:
+      tags: [Stockist]
+      summary: Paginated stockists
+      responses:
+        "200":
+          description: Stockists
+
+  /api/stockists/getStockistOptions:
     get:
-      tags:
-        - Stockist
-      summary: Get all stockists for the logged-in organization
-      security:
-        - bearerAuth: []
+      tags: [Stockist]
+      summary: Stockist options
       responses:
-        '200':
-          description: A list of stockists
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Stockist'
-        '400':
-          description: Error fetching stockists
+        "200":
+          description: Options
 
-  /api/stockist/{id}:
+  /api/stockists/{id}:
     put:
-      tags:
-        - Stockist
-      summary: Update a stockist
-      security:
-        - bearerAuth: []
+      tags: [Stockist]
+      summary: Update stockist
       parameters:
         - in: path
           name: id
           required: true
-          description: Stockist ID
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                name:
-                  type: string
-                  example: Updated Stockist
-                address:
-                  type: string
-                  example: New Address
-                state:
-                  type: string
-                  example: Maharashtra
-                gstNo:
-                  type: string
-                  example: NEWGST123
+          schema: { type: string }
       responses:
-        '200':
-          description: Stockist updated
-        '400':
-          description: Update error
-
+        "200":
+          description: Updated
     delete:
-      tags:
-        - Stockist
-      summary: Delete a stockist
-      security:
-        - bearerAuth: []
+      tags: [Stockist]
+      summary: Delete stockist
       parameters:
         - in: path
           name: id
           required: true
-          description: Stockist ID
-          schema:
-            type: string
+          schema: { type: string }
       responses:
-        '200':
-          description: Deleted successfully
-        '400':
-          description: Deletion error
+        "200":
+          description: Deleted
 
-#headQuarter routes
-paths:
+  /api/sales:
+    post:
+      tags: [Sales]
+      summary: Employee create sale (sets saleByModel Employee)
+      responses:
+        "201":
+          description: Created
 
+  /api/sales/getEmployeeSales:
+    post:
+      tags: [Sales]
+      summary: Sales list for the logged-in employee
+      responses:
+        "200":
+          description: Sales
+
+  /api/sales/getAllSales:
+    post:
+      tags: [Sales]
+      summary: Org sales list
+      responses:
+        "200":
+          description: Sales
+
+  /api/sales/exportAllSales:
+    post:
+      tags: [Sales]
+      summary: Export org sales
+      responses:
+        "200":
+          description: Excel file
+
+  /api/sales/alreadySubmitedSales:
+    get:
+      tags: [Sales]
+      summary: Whether the employee already submitted this month
+      responses:
+        "200":
+          description: Submitted flag
+
+  /api/sales/createSaleByAdmin:
+    post:
+      tags: [Sales]
+      summary: Admin create sale
+      responses:
+        "201":
+          description: Created
+
+  /api/sales/alreadySubmitedSalesByAdmin:
+    get:
+      tags: [Sales]
+      summary: Whether admin already submitted this month
+      responses:
+        "200":
+          description: Submitted flag
+
+  /api/sales/headQuarterSales/{headQuarterId}:
+    post:
+      tags: [Sales]
+      summary: Sales for a headquarter (orgAuth required)
+      parameters:
+        - in: path
+          name: headQuarterId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Sales
+        "401":
+          description: Missing organization
+
+  /api/sales/{id}:
+    put:
+      tags: [Sales]
+      summary: Update sale (saleAmount, month, stockist only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+    delete:
+      tags: [Sales]
+      summary: Delete sale
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+
+  /api/daily-visit/create:
+    post:
+      tags: [Daily Visit]
+      summary: Create daily visit
+      responses:
+        "201":
+          description: Created
+
+  /api/daily-visit/getVisitList:
+    post:
+      tags: [Daily Visit]
+      summary: Employee visit list
+      responses:
+        "200":
+          description: Visits
+
+  /api/daily-visit/getVisitInfo:
+    get:
+      tags: [Daily Visit]
+      summary: Today's visit submission status
+      responses:
+        "200":
+          description: Status
+
+  /api/daily-visit/getSubordinateVisitReport:
+    post:
+      tags: [Daily Visit]
+      summary: Subordinate visit report
+      responses:
+        "200":
+          description: Report
+
+  /api/daily-visit/getOrganizationVisitList:
+    post:
+      tags: [Daily Visit]
+      summary: Org visit list
+      responses:
+        "200":
+          description: Visits
+
+  /api/daily-visit/exportOrganizationVisitList:
+    post:
+      tags: [Daily Visit]
+      summary: Export org visits
+      responses:
+        "200":
+          description: Excel file
+
+  /api/daily-visit/getDoctorVisitReport:
+    get:
+      tags: [Daily Visit]
+      summary: Doctor visit report
+      responses:
+        "200":
+          description: Report
+
+  /api/daily-visit/exportDoctorVisitReport:
+    get:
+      tags: [Daily Visit]
+      summary: Export doctor visit report
+      responses:
+        "200":
+          description: Excel file
+
+  /api/daily-visit/getDoctorVisitSummary:
+    get:
+      tags: [Daily Visit]
+      summary: Doctor visit summary
+      responses:
+        "200":
+          description: Summary
+
+  /api/daily-visit/workingReporting:
+    get:
+      tags: [Daily Visit]
+      summary: Working vs reporting summary
+      responses:
+        "200":
+          description: Summary
+
+  /api/daily-visit/{id}:
+    put:
+      tags: [Daily Visit]
+      summary: Update visit (whitelisted fields only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+    delete:
+      tags: [Daily Visit]
+      summary: Delete visit
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+
+  /api/leaves/apply:
+    post:
+      tags: [Leave]
+      summary: Apply for leave
+      responses:
+        "201":
+          description: Applied
+
+  /api/leaves/my:
+    get:
+      tags: [Leave]
+      summary: Current employee leaves
+      responses:
+        "200":
+          description: Leaves
+
+  /api/leaves/team:
+    post:
+      tags: [Leave]
+      summary: Team leaves (areaManager or zonalManager only)
+      responses:
+        "200":
+          description: Leaves
+        "403":
+          description: Insufficient role
+
+  /api/leaves/{leaveId}/action/manager:
+    patch:
+      tags: [Leave]
+      summary: Approve or reject leave as manager
+      parameters:
+        - in: path
+          name: leaveId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Actioned
+        "403":
+          description: Insufficient role
+
+  /api/leaves/all:
+    post:
+      tags: [Leave]
+      summary: All org leaves (admin)
+      responses:
+        "200":
+          description: Leaves
+
+  /api/leaves/{leaveId}/action/admin:
+    patch:
+      tags: [Leave]
+      summary: Approve or reject leave as admin
+      parameters:
+        - in: path
+          name: leaveId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Actioned
+
+  /api/leaves/getLeaveSummary:
+    get:
+      tags: [Leave]
+      summary: Leave summary
+      responses:
+        "200":
+          description: Summary
+
+  /api/logo/branding:
+    put:
+      tags: [Branding]
+      summary: Update brand name or logo. Response never includes password.
+      responses:
+        "200":
+          description: Branding fields only
+
+  /api/logo/me:
+    get:
+      tags: [Branding]
+      summary: Current organization (no password)
+      responses:
+        "200":
+          description: Org profile
+
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      responses:
+        "200":
+          description: Notifications
+
+  /api/notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all as read
+      responses:
+        "200":
+          description: Updated
+
+  /api/notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark one as read
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+
+  /api/notifications/{id}:
+    delete:
+      tags: [Notifications]
+      summary: Delete notification
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+
+  /api/notifications/settings:
+    get:
+      tags: [Notifications]
+      summary: Notification settings
+      responses:
+        "200":
+          description: Settings
+
+  /api/notifications/settings/toggle:
+    patch:
+      tags: [Notifications]
+      summary: Toggle notification feature
+      responses:
+        "200":
+          description: Updated
+
+  /api/notifications/settings/{eventType}:
+    put:
+      tags: [Notifications]
+      summary: Update event setting
+      parameters:
+        - in: path
+          name: eventType
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+
+  /api/notifications/logo:
+    post:
+      tags: [Notifications]
+      summary: Upload event logo
+      responses:
+        "200":
+          description: Uploaded
+
+  /api/notifications/doctors/{doctorId}/birthday-greeting:
+    post:
+      tags: [Notifications]
+      summary: Send doctor birthday greeting
+      parameters:
+        - in: path
+          name: doctorId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Sent

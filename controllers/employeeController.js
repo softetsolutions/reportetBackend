@@ -405,14 +405,22 @@ export const getAssignedDoctorAndArea = async (req, res) => {
 
     let areas;
 
+    const organizationId = req.employee.organizationId;
+
     if (req?.employee?.role === "zonalManager") {
       areas = await Area.find(
-        { zoneId: { $in: req?.employee?.assignedZones } },
+        {
+          zoneId: { $in: req?.employee?.assignedZones },
+          organizationId,
+        },
         { _id: 1, name: 1 },
       );
     } else {
       areas = await Area.find(
-        { headQuarterId: { $in: req?.employee?.assignedHeadQuarters } },
+        {
+          headQuarterId: { $in: req?.employee?.assignedHeadQuarters },
+          organizationId,
+        },
         { _id: 1, name: 1 },
       );
     }
@@ -422,6 +430,7 @@ export const getAssignedDoctorAndArea = async (req, res) => {
     const doctors = await Doctor.find(
       {
         areaId: { $in: areaId },
+        organizationId,
       },
       {
         _id: 1,
@@ -480,9 +489,14 @@ export const forgotPassword = async (req, res) => {
       .update(rawToken)
       .digest("hex");
 
-    employee.resetPasswordToken = hashedToken;
-    employee.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
-    await employee.save({ validateBeforeSave: false });
+    const resetExpires = new Date(Date.now() + 60 * 60 * 1000);
+    await Employee.updateOne(
+      { _id: employee._id },
+      {
+        resetPasswordToken: hashedToken,
+        resetPasswordExpires: resetExpires,
+      },
+    );
 
     const resetUrl = `${process.env.FRONTEND_URL}/reportet/employee/reset-password/${rawToken}`;
 
@@ -497,9 +511,10 @@ export const forgotPassword = async (req, res) => {
         { email: employee.email, name: employee.displayName },
       ]);
     } catch (mailError) {
-      employee.resetPasswordToken = null;
-      employee.resetPasswordExpires = null;
-      await employee.save({ validateBeforeSave: false });
+      await Employee.updateOne(
+        { _id: employee._id },
+        { resetPasswordToken: null, resetPasswordExpires: null },
+      );
 
       console.error("Mail send failed:", mailError);
       return res.status(500).json({

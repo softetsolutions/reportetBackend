@@ -34,9 +34,9 @@ router.post(
 router.get("/getDoctorVisitReport", authOrOrg, getDoctorVisitReport);
 router.get("/exportDoctorVisitReport", authOrOrg, exportDoctorVisitReport);
 router.get("/getDoctorVisitSummary", orgAuth, getDoctorVisitSummary);
+router.get("/workingReporting", orgAuth, getDailyWorkingVsReportingSummary);
 
 router.put("/:id", orgAuth, updateDailyVisit);
 router.delete("/:id", orgAuth, deleteDailyVisit);
-router.get("/workingReporting", orgAuth, getDailyWorkingVsReportingSummary);
 
 export default router;

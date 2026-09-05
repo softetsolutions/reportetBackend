@@ -109,7 +109,10 @@ export const getAreas = async (req, res) => {
 
 export const getAreaById = async (req, res) => {
   try {
-    const area = await Area.findById(req.params.id).select("name _id");
+    const area = await Area.findOne({
+      _id: req.params.id,
+      organizationId: req.organization?._id,
+    }).select("name _id");
     if (!area) {
       return res.status(404).json({ message: "Area not found" });
     }
@@ -358,8 +361,9 @@ export const getAreasByHeadQuarterId = async (req, res) => {
 export const getEmployeeAssignedAreas = async (req, res) => {
   try {
     if (req?.employee) {
-      if (!req?.employee?.assignedHeadQuarters?.length) {
-        res.status(200).json({
+      const organizationId = req.employee.organizationId;
+      if (!req.employee.assignedHeadQuarters?.length) {
+        return res.status(200).json({
           success: true,
           assignedAreas: [],
         });
@@ -367,7 +371,8 @@ export const getEmployeeAssignedAreas = async (req, res) => {
 
       const assignedAreas = await Area.find(
         {
-          _id: { $in: req?.employee?.assignedHeadQuarters },
+          headQuarterId: { $in: req.employee.assignedHeadQuarters },
+          organizationId,
         },
         {
           _id: 1,
@@ -375,41 +380,44 @@ export const getEmployeeAssignedAreas = async (req, res) => {
         },
       );
 
-      res.status(200).json({
+      return res.status(200).json({
         success: true,
-        assignedAreas: assignedAreas,
-      });
-    } else {
-      const { employeeId } = req?.body;
-
-      const employeeDetail = await Employee.find(
-        {
-          id: employeeId,
-        },
-        {
-          _id: 0,
-          firstName: 0,
-          lastName: 0,
-          userName: 0,
-          employeeId: 0,
-          email: 0,
-          phoneNumber: 0,
-          password: 0,
-          role: 0,
-          organizationId: 0,
-          assignedDoctors: 0,
-          assignedHeadQuarters: 0,
-          createdAt: 0,
-          updatedAt: 0,
-          __v: 0,
-        },
-      ).populate("assignedDoctors", "_id name");
-
-      res?.status(200).json({
-        success: true,
-        assignedAreas: employeeDetail?.assignedDoctors,
+        assignedAreas,
       });
     }
+
+    const { employeeId } = req.body;
+    if (!employeeId) {
+      return res.status(422).json({
+        success: false,
+        message: "employeeId is required",
+      });
+    }
+
+    const employeeDetail = await Employee.findOne({
+      _id: employeeId,
+      organizationId: req.organization?._id,
+    }).select("assignedHeadQuarters");
+
+    if (!employeeDetail) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    const assignedAreas = await Area.find(
+      {
+        headQuarterId: { $in: employeeDetail.assignedHeadQuarters },
+        organizationId: req.organization._id,
+      },
+      { _id: 1, name: 1 },
+    );
+
+    return res.status(200).json({
+      success: true,
+      assignedAreas,
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -475,9 +483,24 @@ export const deleteArea = async (req, res) => {
   try {
     const { areaId } = req.params;
     const { force } = req.query;
+    const organizationId = req.organization?._id;
 
-    console.log("force param:", req.query.force, typeof req.query.force);
-    const linkedDoctorCount = await Doctor.countDocuments({ areaId });
+    if (!organizationId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const area = await Area.findOne({ _id: areaId, organizationId });
+    if (!area) {
+      return res.status(404).json({
+        success: false,
+        message: "Area not found or access denied",
+      });
+    }
+
+    const linkedDoctorCount = await Doctor.countDocuments({
+      areaId,
+      organizationId,
+    });
 
     if (linkedDoctorCount > 0 && force !== "true") {
       return res.status(409).json({
@@ -488,14 +511,13 @@ export const deleteArea = async (req, res) => {
       });
     }
     if (linkedDoctorCount > 0 && force === "true") {
-      await Doctor.deleteMany({ areaId });
+      await Doctor.deleteMany({ areaId, organizationId });
     }
 
     const deleted = await Area.findOneAndDelete({
       _id: areaId,
-      organizationId: req?.organization?._id,
+      organizationId,
     });
-    console.log("force param:", req.query.force, typeof req.query.force);
 
     if (!deleted) {
       return res.status(404).json({

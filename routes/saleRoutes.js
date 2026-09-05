@@ -9,7 +9,10 @@ import {
   alreadySubmitedSale,
   getHeadQuarterSales,
 } from "../controllers/saleController.js";
-import {createSaleByAdmin, alreadySubmitedSaleByAdmin} from "../controllers/adminSaleController.js";
+import {
+  createSaleByAdmin,
+  alreadySubmitedSaleByAdmin,
+} from "../controllers/adminSaleController.js";
 import { auth, orgAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -22,8 +25,8 @@ router.get("/alreadySubmitedSales", auth, alreadySubmitedSale);
 
 router.post("/createSaleByAdmin", orgAuth, createSaleByAdmin);
 router.get("/alreadySubmitedSalesByAdmin", orgAuth, alreadySubmitedSaleByAdmin);
+router.post("/headQuarterSales/:headQuarterId", orgAuth, getHeadQuarterSales);
 router.put("/:id", orgAuth, updateSale);
 router.delete("/:id", orgAuth, deleteSale);
-router.post("/headQuarterSales/:headQuarterId", getHeadQuarterSales);
 
 export default router;

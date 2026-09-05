@@ -13,6 +13,7 @@ const doctorSchema = new mongoose.Schema(
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",
+      required: true,
     },
     areaId: { type: mongoose.Schema.Types.ObjectId, ref: "Area" },
     // assignedTo: {

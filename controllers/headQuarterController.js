@@ -9,19 +9,25 @@ import { getCellStringValue } from "../utils/helperFunction.js";
 import Zone from "../models/Zone.js";
 
 export const addHeadquarter = async (req, res) => {
+  const { hierrarchy } = req.body;
+  if (!hierrarchy?.headquarters?.length) {
+    return res.json({
+      success: false,
+      message: "Empty headquarter",
+    });
+  }
+
+  const organizationId = req.organization?._id;
+  if (!organizationId) {
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized",
+    });
+  }
+
   const session = await mongoose.startSession();
   try {
-    const { hierrarchy } = req.body;
-    if (!hierrarchy?.headquarters?.length) {
-      return res.json({
-        success: false,
-        message: "Empty headquarter",
-      });
-    }
-
     const result = await session.withTransaction(async () => {
-      const organizationId = hierrarchy.headquarters[0].organizationId;
-
       const zoneNames = [
         ...new Set(
           hierrarchy.headquarters.map((hq) => hq.zone?.trim()).filter(Boolean),
@@ -56,9 +62,10 @@ export const addHeadquarter = async (req, res) => {
       }
 
       const headquartersToInsert = hierrarchy.headquarters.map((hq) => {
-        const { zone, ...rest } = hq;
+        const { zone, organizationId: _clientOrgId, ...rest } = hq;
         return {
           ...rest,
+          organizationId,
           zone: zone?.trim()
             ? zoneNameToId[zone.trim().toUpperCase()]
             : undefined,
@@ -70,10 +77,24 @@ export const addHeadquarter = async (req, res) => {
       });
 
       const areas = hierrarchy?.areas?.length
-        ? await Area.insertMany(hierrarchy.areas, { session })
+        ? await Area.insertMany(
+            hierrarchy.areas.map(({ organizationId: _clientOrgId, ...area }) => ({
+              ...area,
+              organizationId,
+            })),
+            { session },
+          )
         : [];
       const doctor = hierrarchy?.doctors?.length
-        ? await Doctor.insertMany(hierrarchy.doctors, { session })
+        ? await Doctor.insertMany(
+            hierrarchy.doctors.map(
+              ({ organizationId: _clientOrgId, ...doc }) => ({
+                ...doc,
+                organizationId,
+              }),
+            ),
+            { session },
+          )
         : [];
 
       return { headquarters, areas, doctor };

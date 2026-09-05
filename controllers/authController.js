@@ -2,8 +2,8 @@ import Employee from "../models/Employee.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 
-const generateToken = (id, role, assignedHeadQuarter) =>
-  jwt.sign({ id, role, assignedHeadQuarter }, process.env.JWT_SECRET);
+export const generateToken = (id, role, assignedHeadQuarter) =>
+  jwt.sign({ id, role, assignedHeadQuarter, typ: "employee" }, process.env.JWT_SECRET);
 
 export const login = async (req, res) => {
   try {

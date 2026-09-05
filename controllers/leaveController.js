@@ -42,7 +42,10 @@ export const applyLeave = async (req, res) => {
 
 export const getMyLeaves = async (req, res) => {
   try {
-    const leaves = await Leave.find({ employeeId: req.employee._id }).sort({
+    const leaves = await Leave.find({
+      employeeId: req.employee._id,
+      organizationId: req.employee.organizationId,
+    }).sort({
       createdAt: -1,
     });
 

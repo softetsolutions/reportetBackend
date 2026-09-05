@@ -66,7 +66,15 @@ export const getDoctorsByAreaId = async (req, res) => {
   try {
     const { areaId } = req.params;
 
-    const doctors = await Doctor.find({ areaId }).select("name specialty _id");
+    const organizationId =
+      req.employee?.organizationId || req.organization?._id;
+    if (!organizationId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const doctors = await Doctor.find({ areaId, organizationId }).select(
+      "name specialty _id",
+    );
 
     if (doctors.length === 0) {
       return res

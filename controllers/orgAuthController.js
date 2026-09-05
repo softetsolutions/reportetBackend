@@ -5,8 +5,10 @@ import bcrypt from "bcrypt";
 import { generateOrganizationCode } from "../utils/helperFunction.js";
 import { seedDefaultNotificationSettings } from "../utils/NotificationService.js";
 
-const generateOrgToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+export const generateOrgToken = (id) => {
+  return jwt.sign({ id, typ: "org" }, process.env.JWT_SECRET, {
+    expiresIn: "7d",
+  });
 };
 
 export const orgRegister = async (req, res) => {

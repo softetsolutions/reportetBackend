@@ -71,7 +71,10 @@ export const getDailyVisitList = async (req, res) => {
     const fromDate = toISTDateString(from);
     const toDate = toISTDateString(to);
 
-    const filter = { employeeId: employeeId };
+    const filter = {
+      employeeId: employeeId,
+      organizationId: req.employee.organizationId,
+    };
     if (from || to) {
       filter.visitDate = {};
       if (from) {
@@ -181,6 +184,7 @@ export const getDailyVisitInfo = async (req, res) => {
 
     const alreadySubmitted = await DailyVisit.find({
       employeeId,
+      organizationId: req.employee.organizationId,
       createdAt: {
         $gte: startOfDay,
         $lte: endOfDay,
@@ -213,12 +217,31 @@ export const updateDailyVisit = async (req, res) => {
   try {
     const { id } = req.params;
 
+    const { areaId, doctorId, remark, visitDate, with: withId, assistedBy } =
+      req.body;
+    const update = {};
+    if (areaId !== undefined) update.areaId = areaId;
+    if (doctorId !== undefined) update.doctorId = doctorId;
+    if (remark !== undefined) update.remark = remark;
+    if (visitDate !== undefined) {
+      update.visitDate = dayjs(visitDate).tz("Asia/Kolkata").format("YYYY-MM-DD");
+    }
+    if (withId !== undefined) update.with = withId;
+    if (assistedBy !== undefined) update.assistedBy = assistedBy;
+
+    if (!Object.keys(update).length) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide at least one field to update",
+      });
+    }
+
     const updatedVisit = await DailyVisit.findOneAndUpdate(
       {
         _id: id,
-        organizationId: req?.organization?.id, // scope to org for safety
+        organizationId: req?.organization?.id,
       },
-      req.body,
+      { $set: update },
       { new: true, runValidators: true },
     )
       .populate("employeeId", "_id firstName lastName role")
