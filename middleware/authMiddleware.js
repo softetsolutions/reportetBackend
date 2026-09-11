@@ -12,7 +12,9 @@ const EMPLOYEE_PROJECTION = {
 };
 
 function tokenFromRequest(req, cookieName) {
-  return req.cookies?.[cookieName] || req.headers["authorization"]?.split(" ")[1];
+  return (
+    req.cookies?.[cookieName] || req.headers["authorization"]?.split(" ")[1]
+  );
 }
 
 export const auth = async (req, res, next) => {

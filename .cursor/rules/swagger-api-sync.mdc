@@ -1,0 +1,14 @@
+---
+description: Keep swagger.yaml in sync whenever APIs are added or changed
+alwaysApply: true
+---
+
+# Swagger must match APIs
+
+Whenever you create, change, rename, or remove an HTTP API endpoint:
+
+1. Update `swagger.yaml` in the **same change** — do not leave docs for a follow-up.
+2. Document path, method, auth (employee / org / both), request body, query/path params, and response shape (including important error codes).
+3. Remove or replace obsolete paths so swagger does not advertise dead endpoints.
+4. Reuse or add `components.schemas` when response/request objects are shared.
+5. Treat swagger drift as incomplete work — the API is not done until swagger is updated.

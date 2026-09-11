@@ -22,6 +22,84 @@ components:
           example: false
         message:
           type: string
+    LeaveType:
+      type: object
+      properties:
+        _id: { type: string }
+        organizationId: { type: string }
+        name: { type: string, example: Casual Leave }
+        code: { type: string, example: CL }
+        annualQuota: { type: number, example: 12 }
+        paid: { type: boolean }
+        creditWindow:
+          type: string
+          enum: [MONTHLY, QUARTERLY, HALF_YEARLY, YEARLY]
+        creditAmount: { type: number }
+        carryForward: { type: boolean }
+        maxCarryForward: { type: number }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Leave:
+      type: object
+      properties:
+        _id: { type: string }
+        employeeId:
+          oneOf:
+            - type: string
+            - type: object
+              properties:
+                _id: { type: string }
+                firstName: { type: string }
+                lastName: { type: string }
+                employeeId: { type: string }
+                role:
+                  type: string
+                  enum: [mr, areaManager, zonalManager]
+        organizationId: { type: string }
+        leaveType:
+          oneOf:
+            - type: string
+            - type: object
+              properties:
+                _id: { type: string }
+                name: { type: string }
+                code: { type: string }
+                paid: { type: boolean }
+        leaveDate: { type: string, format: date-time }
+        reason: { type: string }
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        approvedBy: { type: string, nullable: true }
+        approvedByRole:
+          type: string
+          nullable: true
+          enum: [areaManager, zonalManager, admin]
+        actionAt: { type: string, format: date-time, nullable: true }
+        rejectionReason: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    LeaveBreakdownEntry:
+      type: object
+      properties:
+        code: { type: string, example: CL }
+        name: { type: string, example: Casual Leave }
+        days: { type: integer, example: 2 }
+    LeaveReportRow:
+      type: object
+      properties:
+        employeeId: { type: string, example: emp-001 }
+        employeeName: { type: string, example: Rahul Sharma }
+        managerName: { type: string, nullable: true, example: Priya Mehta }
+        role:
+          type: string
+          enum: [mr, areaManager, zonalManager]
+        totalLeaves: { type: integer, example: 5 }
+        leaveBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeaveBreakdownEntry"
 
 security:
   - bearerAuth: []
@@ -106,6 +184,100 @@ paths:
       responses:
         "200":
           description: JWT with typ org, expires in 7 days
+
+  /api/employee/profile:
+    get:
+      tags: [Employee]
+      summary: Logged-in employee profile
+      description: |
+        Employee Bearer token.
+        Returns profile (with assigned HQs), immediate manager (or null),
+        direct reportees (name, employeeId, headquarters), and assigned doctors.
+        Direct reportees: AM → MR, ZM → AM, MR → none. Matched by HQ subset.
+        HQ city/state are parsed from HeadQuarter.location when formatted as "City, State".
+      responses:
+        "200":
+          description: Profile payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  profile:
+                    type: object
+                    properties:
+                      _id: { type: string }
+                      firstName: { type: string }
+                      lastName: { type: string }
+                      employeeId: { type: string }
+                      role:
+                        type: string
+                        enum: [mr, areaManager, zonalManager]
+                      phone: { type: string, nullable: true }
+                      email: { type: string }
+                      assignedHeadQuarters:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            _id: { type: string }
+                            headQuarterName: { type: string }
+                            city: { type: string, nullable: true }
+                            state: { type: string, nullable: true }
+                  manager:
+                    nullable: true
+                    type: object
+                    properties:
+                      _id: { type: string }
+                      firstName: { type: string }
+                      lastName: { type: string }
+                      employeeId: { type: string }
+                      role: { type: string }
+                      phone: { type: string, nullable: true }
+                      email: { type: string }
+                      headQuarterName: { type: string, nullable: true }
+                  reportees:
+                    type: array
+                    description: Direct reports. Empty for MR.
+                    items:
+                      type: object
+                      properties:
+                        _id: { type: string }
+                        name: { type: string }
+                        firstName: { type: string }
+                        lastName: { type: string }
+                        employeeId: { type: string }
+                        role:
+                          type: string
+                          enum: [mr, areaManager]
+                        assignedHeadQuarters:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              _id: { type: string }
+                              headQuarterName: { type: string }
+                              city: { type: string, nullable: true }
+                              state: { type: string, nullable: true }
+                  doctors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        _id: { type: string }
+                        name: { type: string }
+                        specialty: { type: string, nullable: true }
+                        headQuarterId: { type: string, nullable: true }
+                        headQuarterName: { type: string, nullable: true }
+                        areaId: { type: string, nullable: true }
+                        areaName: { type: string, nullable: true }
+        "401":
+          description: Unauthorized
+        "404":
+          description: Employee not found
+        "500":
+          description: Failed to fetch profile
 
   /api/employee/create:
     post:
@@ -773,75 +945,467 @@ paths:
         "200":
           description: Deleted
 
+  /api/leaves/types:
+    get:
+      tags: [Leave]
+      summary: Leave types master list
+      description: |
+        Employee or org admin token.
+        Returns organization leave types for Apply dropdown / master.
+        By default only active types. Pass includeInactive=true to include inactive (admin UI).
+      parameters:
+        - in: query
+          name: includeInactive
+          schema: { type: string, enum: ["true", "false"] }
+          description: When true, returns inactive types as well
+      responses:
+        "200":
+          description: Leave types
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  leaveTypes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LeaveType"
+        "401":
+          description: Unauthorized
+        "500":
+          description: Failed to fetch leave types
+    post:
+      tags: [Leave]
+      summary: Create leave type (admin / orgToken)
+      description: |
+        Org admin token only.
+        Creates a leave type and seeds EmployeeLeaveBalance = annualQuota for all active employees.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, code, annualQuota, paid]
+              properties:
+                name: { type: string, example: Casual Leave }
+                code: { type: string, example: CL }
+                annualQuota: { type: number, example: 12 }
+                paid: { type: boolean, example: true }
+                creditWindow:
+                  type: string
+                  enum: [MONTHLY, QUARTERLY, HALF_YEARLY, YEARLY]
+                  default: YEARLY
+                creditAmount:
+                  type: number
+                  description: Defaults to annualQuota
+                carryForward: { type: boolean, default: false }
+                maxCarryForward: { type: number, default: 0 }
+                active: { type: boolean, default: true }
+      responses:
+        "201":
+          description: Leave type created and balances seeded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string }
+                  leaveType:
+                    $ref: "#/components/schemas/LeaveType"
+        "409":
+          description: Duplicate leave type name
+        "422":
+          description: Validation error
+        "500":
+          description: Failed to create leave type
+
+  /api/leaves/types/{id}:
+    put:
+      tags: [Leave]
+      summary: Update leave type (admin / orgToken)
+      description: |
+        Org admin token only.
+        If annualQuota changes, employee balances are adjusted by the delta (floored at 0).
+        Reactivating a type re-seeds missing employee balances.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+          description: LeaveType ObjectId
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                code: { type: string }
+                annualQuota: { type: number }
+                paid: { type: boolean }
+                creditWindow:
+                  type: string
+                  enum: [MONTHLY, QUARTERLY, HALF_YEARLY, YEARLY]
+                creditAmount: { type: number }
+                carryForward: { type: boolean }
+                maxCarryForward: { type: number }
+                active: { type: boolean }
+      responses:
+        "200":
+          description: Leave type updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string }
+                  leaveType:
+                    $ref: "#/components/schemas/LeaveType"
+        "400":
+          description: Invalid leave type ID
+        "404":
+          description: Leave type not found
+        "409":
+          description: Duplicate leave type name
+        "422":
+          description: Validation error
+        "500":
+          description: Failed to update leave type
+
+  /api/leaves/balance:
+    get:
+      tags: [Leave]
+      summary: Current employee leave balance cards
+      description: |
+        Employee token only.
+        One card per active leave type with remaining balance, used (approved) count, and annualQuota.
+        Uses EmployeeLeaveBalance when present; otherwise falls back to annualQuota - approved leaves.
+      responses:
+        "200":
+          description: Balance cards
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  balances:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        leaveType:
+                          $ref: "#/components/schemas/LeaveType"
+                        balance: { type: number }
+                        used: { type: number }
+                        annualQuota: { type: number }
+        "401":
+          description: Unauthorized
+        "500":
+          description: Failed to fetch leave balance
+
   /api/leaves/apply:
     post:
       tags: [Leave]
-      summary: Apply for leave
+      summary: Apply for leave (employee token)
+      description: |
+        Creates a leave request for the authenticated employee using a single leaveDate.
+        Requires an active leave type and available balance (balance - pending >= 1).
+        Balance is not reduced until the leave is approved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leaveType, date, reason]
+              properties:
+                leaveType:
+                  type: string
+                  description: LeaveType ObjectId
+                date:
+                  type: string
+                  format: date
+                  description: Leave date (maps to leaveDate)
+                reason:
+                  type: string
       responses:
         "201":
-          description: Applied
+          description: Leave applied successfully
+        "422":
+          description: Missing fields, inactive type, or insufficient leave balance
+        "500":
+          description: Failed to apply leave
 
   /api/leaves/my:
     get:
       tags: [Leave]
       summary: Current employee leaves
-      responses:
-        "200":
-          description: Leaves
-
-  /api/leaves/team:
-    post:
-      tags: [Leave]
-      summary: Team leaves (areaManager or zonalManager only)
-      responses:
-        "200":
-          description: Leaves
-        "403":
-          description: Insufficient role
-
-  /api/leaves/{leaveId}/action/manager:
-    patch:
-      tags: [Leave]
-      summary: Approve or reject leave as manager
+      description: Returns leaves for the authenticated employee. Supports optional filters.
       parameters:
-        - in: path
-          name: leaveId
-          required: true
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+        - in: query
+          name: leaveType
           schema: { type: string }
+          description: LeaveType ObjectId
+        - in: query
+          name: fromDate
+          schema: { type: string, format: date }
+        - in: query
+          name: toDate
+          schema: { type: string, format: date }
       responses:
         "200":
-          description: Actioned
-        "403":
-          description: Insufficient role
+          description: Leaves for the current employee
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  leaves:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Leave"
+        "500":
+          description: Failed to fetch leaves
 
-  /api/leaves/all:
-    post:
-      tags: [Leave]
-      summary: All org leaves (admin)
-      responses:
-        "200":
-          description: Leaves
-
-  /api/leaves/{leaveId}/action/admin:
-    patch:
-      tags: [Leave]
-      summary: Approve or reject leave as admin
-      parameters:
-        - in: path
-          name: leaveId
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: Actioned
-
-  /api/leaves/getLeaveSummary:
+  /api/leaves/subordinates:
     get:
       tags: [Leave]
-      summary: Leave summary
+      summary: Subordinate leaves split into direct and other reports
+      description: |
+        Employee (AM/ZM) or org admin token.
+        Direct vs other:
+        - areaManager → direct: MR, other: none
+        - zonalManager → direct: AM, other: MR
+        - admin → direct: ZM, other: AM + MR
+        Scope uses HQ subset (same subordinate matching as getSubordinates).
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+        - in: query
+          name: leaveType
+          schema: { type: string }
+          description: LeaveType ObjectId
+        - in: query
+          name: fromDate
+          schema: { type: string, format: date }
+        - in: query
+          name: toDate
+          schema: { type: string, format: date }
       responses:
         "200":
-          description: Summary
+          description: Leaves grouped by reporting level
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  directReports:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Leave"
+                  otherReports:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Leave"
+        "401":
+          description: Unauthorized
+        "500":
+          description: Failed to fetch subordinate leaves
+
+  /api/leaves/getLeaveReport:
+    get:
+      tags: [Leave]
+      summary: Paginated employee leave report (admin)
+      description: |
+        Organization (admin) token only.
+        Returns active employees with approved leave day totals for the selected calendar month/year.
+        `totalLeaves` is the sum of `leaveBreakdown[].days`.
+        `managerName` uses the same direct-manager rules as employee profile (MR→AM, AM→ZM, ZM→null).
+      parameters:
+        - in: query
+          name: month
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+        - in: query
+          name: year
+          required: true
+          schema:
+            type: integer
+            example: 2026
+        - in: query
+          name: employeeName
+          schema: { type: string }
+          description: Partial match on first/last name
+        - in: query
+          name: role
+          schema:
+            type: string
+            enum: [mr, areaManager, zonalManager]
+        - in: query
+          name: pageNo
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 50
+      responses:
+        "200":
+          description: Leave report page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message:
+                    type: string
+                    example: Leave report fetched successfully
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LeaveReportRow"
+                  pagination:
+                    type: object
+                    properties:
+                      total: { type: integer, example: 25 }
+                      pageNo: { type: integer, example: 1 }
+                      limit: { type: integer, example: 10 }
+                      totalPages: { type: integer, example: 3 }
+        "400":
+          description: Invalid month, year, or role
+        "401":
+          description: Not authenticated
+        "500":
+          description: Failed to fetch leave report
+
+  /api/leaves/exportLeaveReport:
+    get:
+      tags: [Leave]
+      summary: Export employee leave report as Excel (admin)
+      description: |
+        Organization (admin) token only.
+        Same filters as getLeaveReport (no pagination). Returns an `.xlsx` file with
+        one column per active leave type code plus total leaves.
+      parameters:
+        - in: query
+          name: month
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+        - in: query
+          name: year
+          required: true
+          schema:
+            type: integer
+            example: 2026
+        - in: query
+          name: employeeName
+          schema: { type: string }
+        - in: query
+          name: role
+          schema:
+            type: string
+            enum: [mr, areaManager, zonalManager]
+      responses:
+        "200":
+          description: Excel file
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid month, year, or role
+        "401":
+          description: Not authenticated
+        "500":
+          description: Failed to export leave report
+
+  /api/leaves/{id}/action:
+    post:
+      tags: [Leave]
+      summary: Approve or reject a subordinate leave
+      description: |
+        Employee (AM/ZM) or org admin token.
+        Approval chain:
+        - AM can action MR
+        - ZM can action AM and MR
+        - Admin can action ZM, AM, and MR
+        Applicant must be in actor HQ/org scope. Only pending leaves can be actioned.
+        On approve: employee leave balance for that type is decremented by 1.
+        On reject: balance is unchanged.
+        Approve fails with 409 if balance is insufficient.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+          description: Leave ObjectId
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [approved, rejected]
+                rejectionReason:
+                  type: string
+                  description: Required when action is rejected
+      responses:
+        "200":
+          description: Leave actioned successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string }
+                  leave:
+                    $ref: "#/components/schemas/Leave"
+        "400":
+          description: Invalid leave ID
+        "403":
+          description: Not authorized for this leave
+        "404":
+          description: Leave not found
+        "409":
+          description: Leave already approved or rejected
+        "422":
+          description: Invalid action or missing rejectionReason
+        "500":
+          description: Failed to action leave
 
   /api/logo/branding:
     put:

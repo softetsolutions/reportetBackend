@@ -3,14 +3,12 @@
   "version": "1.0.0",
   "description": "",
   "main": "server.js",
-  
   "scripts": {
     "test": "node --test tests/*.test.js",
     "start": "node server.js",
     "dev": "nodemon --ignore uploads/ server.js",
     "deploy": "bash scripts/deploy.sh"
   },
-
   "keywords": [],
   "author": "",
   "license": "ISC",
