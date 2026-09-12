@@ -3,9 +3,12 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 
 import { generateOrganizationCode } from "../utils/helperFunction.js";
+import { seedDefaultNotificationSettings } from "../utils/NotificationService.js";
 
-const generateOrgToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+export const generateOrgToken = (id) => {
+  return jwt.sign({ id, typ: "org" }, process.env.JWT_SECRET, {
+    expiresIn: "7d",
+  });
 };
 
 export const orgRegister = async (req, res) => {
@@ -19,6 +22,8 @@ export const orgRegister = async (req, res) => {
       password: hashed,
       code: orgcode,
     });
+
+    await seedDefaultNotificationSettings(org._id);
 
     const token = generateOrgToken(org._id);
     res.cookie("orgToken", token, {

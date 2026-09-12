@@ -12,13 +12,26 @@ export const createSale = async (req, res) => {
     //   month: "long",
     // });
 
+    const organizationId = req?.employee?.organizationId;
+    const stockistDoc = await Stockist.findOne({
+      _id: stockist,
+      organizationId,
+    });
+    if (!stockistDoc) {
+      return res.status(404).json({
+        success: false,
+        error: "Stockist not found in your organization",
+      });
+    }
+
     const sale = await Sale.create({
       saleBy: req?.employee?._id,
-      stockist: stockist,
+      saleByModel: "Employee",
+      stockist: stockistDoc._id,
       month: month.toLowerCase(),
       year: Number(currentYearInIndia),
       saleAmount: saleAmount,
-      organizationId: req?.employee?.organizationId, // automatically assigned
+      organizationId,
     });
 
     res.status(201).json({
@@ -91,7 +104,10 @@ export const getSalesListOfEmployee = async (req, res) => {
       });
     }
 
-    const filter = { saleBy: employeeId };
+    const filter = {
+      saleBy: employeeId,
+      organizationId: req.employee.organizationId,
+    };
 
     if (fromDate || toDate) {
       filter.createdAt = {};
@@ -136,14 +152,22 @@ export const getSalesListOfEmployee = async (req, res) => {
 
 export const getAllSales = async (req, res) => {
   try {
-    let { employeeId, months, years, pageNo = 1, limit = 10 } = req?.body;
+    let {
+      employeeId,
+      months,
+      years,
+      isAdmin = false,
+      pageNo = 1,
+      limit = 10,
+    } = req?.body;
 
     pageNo = Number(req.body.pageNo) || 1;
     limit = Number(req.body.limit) || 5;
 
     const filter = {
       organizationId: req?.organization?.id,
-      ...(employeeId && { saleBy: employeeId }),
+      ...(employeeId && !isAdmin && { saleBy: employeeId }),
+      ...(isAdmin && { saleBy: req?.organization?.id }),
       ...(months && months.length > 0 && { month: { $in: months } }),
     };
 
@@ -174,7 +198,7 @@ export const getAllSales = async (req, res) => {
           limit,
         },
       )
-        .populate("saleBy", "_id firstName lastName role")
+        .populate("saleBy", "_id firstName lastName role organizationName ")
         .populate("stockist", "_id name"),
       Sale.countDocuments(filter),
     ]);
@@ -197,12 +221,25 @@ export const updateSale = async (req, res) => {
   try {
     const { id } = req.params;
 
+    const { saleAmount, month, stockist } = req.body;
+    const update = {};
+    if (saleAmount !== undefined) update.saleAmount = saleAmount;
+    if (month !== undefined) update.month = String(month).toLowerCase();
+    if (stockist !== undefined) update.stockist = stockist;
+
+    if (!Object.keys(update).length) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide saleAmount, month, or stockist to update",
+      });
+    }
+
     const updatedSale = await Sale.findOneAndUpdate(
       {
         _id: id,
         organizationId: req?.organization?.id,
       },
-      req.body,
+      { $set: update },
       { new: true, runValidators: true },
     )
       .populate("saleBy", "_id firstName lastName role")
@@ -329,7 +366,14 @@ export const getHeadQuarterSales = async (req, res) => {
   try {
     const { headQuarterId } = req.params;
     const { years } = req.body;
-    const organizationId = req?.organization?.id;
+    const organizationId = req.organization?._id || req.organization?.id;
+
+    if (!organizationId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     if (!headQuarterId) {
       return res.status(422).json({

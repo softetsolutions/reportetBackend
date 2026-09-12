@@ -1,6 +1,7 @@
 export const Roles = {
-  AREA_MANAGER: "area_manager",
   MR: "mr",
+  AREA_MANAGER: "areaManager",
+  ZONAL_MANAGER: "zonalManager",
 };
 
 export const roleOrder = ["mr", "areaManager", "zonalManager"];

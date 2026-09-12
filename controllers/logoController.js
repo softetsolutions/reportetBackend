@@ -58,7 +58,7 @@ export const editBranding = async (req, res) => {
     const updated = await Organization.findByIdAndUpdate(
       orgId,
       { $set: updateFields },
-      { new: true, runValidators: true },
+      { new: true, runValidators: true, projection: { password: 0 } },
     );
 
     if (!updated) {
@@ -76,7 +76,14 @@ export const editBranding = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Branding updated successfully",
-      data: updated,
+      data: {
+        _id: updated._id,
+        organizationName: updated.organizationName,
+        brandName: updated.brandName,
+        logoUrl: updated.logoUrl,
+        email: updated.email,
+        code: updated.code,
+      },
     });
   } catch (error) {
     if (req.file) await safeUnlink(req.file.path);

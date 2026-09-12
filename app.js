@@ -4,6 +4,8 @@ import dotenv from "dotenv";
 import cors from "cors";
 import fs from "fs";
 import mongoose from "mongoose";
+import yaml from "yamljs";
+import swaggerUi from "swagger-ui-express";
 // import { middleware } from "visualize-et";
 
 import authRoutes from "./routes/authRoutes.js";
@@ -20,17 +22,18 @@ import leaveRoutes from "./routes/leaveRoutes.js";
 import budgetRoutes from "./routes/headQuarterBudgetRoutes.js";
 import zoneRoutes from "./routes/zoneRoutes.js";
 import trackingRoutes from "./routes/tracking.routes.js";
-import swaggerUi from "swagger-ui-express";
-import yaml from "yamljs";
+import { requestLogger } from "./middleware/logger.js";
+import notificationRoutes from "./routes/notificationsRoute.js";
 
 dotenv.config();
 const app = express();
 
-["uploads", "uploads/logos"].forEach((dir) => {
+["uploads", "uploads/logos", "uploads/exports"].forEach((dir) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 app.use(express.json({ limit: "10kb" }));
 app.use(cookieParser());
+app.use(requestLogger);
 
 app.use(
   cors({
@@ -69,4 +72,6 @@ app.use("/api/logo", brandingRoutes);
 app.use("/api/budget", budgetRoutes);
 app.use("/api/zone", zoneRoutes);
 app.use("/api/tracking", trackingRoutes);
+app.use("/api/notifications", notificationRoutes);
+
 export default app;

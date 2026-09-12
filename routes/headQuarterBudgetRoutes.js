@@ -10,10 +10,10 @@ import {
 
 const router = express.Router();
 
+router.get("/meta/years", orgAuth, getConfiguredFinancialYears);
+router.get("/", orgAuth, getAllHeadQuarterBudgetsForYear);
 router.put("/:headQuarterId", orgAuth, setHeadQuarterBudget);
 router.patch("/:headQuarterId", orgAuth, updateMonthlyBudget);
 router.get("/:headQuarterId", orgAuth, getHeadQuarterBudget);
-router.get("/", orgAuth, getAllHeadQuarterBudgetsForYear);
-router.get("/meta/years", orgAuth, getConfiguredFinancialYears);
 
 export default router;

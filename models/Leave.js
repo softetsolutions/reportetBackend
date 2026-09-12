@@ -13,27 +13,24 @@ const leaveSchema = new mongoose.Schema(
       required: true,
     },
     leaveType: {
-      type: String,
-      enum: ["sick", "casual", "earned", "unpaid"],
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Leavetype",
       required: true,
     },
-    startDate: { type: Date, required: true },
-    endDate: { type: Date, required: true },
+    leaveDate: { type: Date, required: true },
     reason: { type: String, required: true },
     status: {
       type: String,
       enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
-   
-    actionBy: {
+    approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Employee",
       default: null,
     },
-    actionByRole: {
+    approvedByRole: {
       type: String,
-      enum: ["admin", "areaManager"],
+      enum: ["areaManager", "zonalManager", "admin"],
       default: null,
     },
     actionAt: { type: Date, default: null },

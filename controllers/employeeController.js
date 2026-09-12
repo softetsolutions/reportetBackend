@@ -9,6 +9,121 @@ import {
 import Area from "../models/Area.js";
 import crypto from "crypto";
 import Doctor from "../models/Doctor.js";
+import { seedBalancesForEmployee } from "../utils/leaveBalance.js";
+import { findImmediateManager } from "../utils/employeeManager.js";
+
+const DIRECT_REPORTEE_ROLE = {
+  mr: null,
+  areaManager: "mr",
+  zonalManager: "areaManager",
+};
+
+const formatPhone = (phoneNumber) => {
+  if (phoneNumber === undefined || phoneNumber === null || phoneNumber === "") {
+    return null;
+  }
+  return String(phoneNumber);
+};
+
+const parseLocation = (location) => {
+  if (!location?.trim()) return { city: null, state: null };
+  const parts = String(location)
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length >= 2) {
+    return { city: parts[0], state: parts.slice(1).join(", ") };
+  }
+  return { city: parts[0] || null, state: null };
+};
+
+const getEmployeeAreas = async (employee) => {
+  const organizationId = employee.organizationId;
+
+  return Area.find({
+    organizationId,
+    headQuarterId: { $in: employee.assignedHeadQuarters || [] },
+  })
+    .select("_id name headQuarterId zoneId")
+    .populate("headQuarterId", "headQuarterName location")
+    .lean();
+};
+
+const getProfileDoctors = async (employee) => {
+  const areas = await getEmployeeAreas(employee);
+  if (!areas.length) return [];
+
+  const areaById = new Map(areas.map((area) => [String(area._id), area]));
+  const doctors = await Doctor.find({
+    organizationId: employee.organizationId,
+    areaId: { $in: areas.map((area) => area._id) },
+  })
+    .select("_id name specialty areaId")
+    .lean();
+
+  return doctors.map((doctor) => {
+    const area = areaById.get(String(doctor.areaId));
+    const hq = area?.headQuarterId;
+    return {
+      _id: doctor._id,
+      name: doctor.name,
+      specialty: doctor.specialty || null,
+      headQuarterId: hq?._id || area?.headQuarterId || null,
+      headQuarterName: hq?.headQuarterName || null,
+      areaId: area?._id || doctor.areaId || null,
+      areaName: area?.name || null,
+    };
+  });
+};
+
+const mapAssignedHeadQuarters = (headQuarters = []) =>
+  headQuarters.map((hq) => {
+    const { city, state } = parseLocation(hq.location);
+    return {
+      _id: hq._id,
+      headQuarterName: hq.headQuarterName,
+      city,
+      state,
+    };
+  });
+
+const getHqIds = (headQuarters = []) =>
+  headQuarters.map((hq) => hq?._id || hq).filter(Boolean);
+
+const findDirectReportees = async (employee) => {
+  const reporteeRole = DIRECT_REPORTEE_ROLE[employee.role];
+  if (!reporteeRole) return [];
+
+  const hqIds = getHqIds(employee.assignedHeadQuarters);
+  if (!hqIds.length) return [];
+
+  const reportees = await Employee.find({
+    organizationId: employee.organizationId,
+    role: reporteeRole,
+    isActive: true,
+    _id: { $ne: employee._id },
+    assignedHeadQuarters: {
+      $not: { $elemMatch: { $nin: hqIds } },
+      $ne: [],
+    },
+  })
+    .select("firstName lastName employeeId role assignedHeadQuarters")
+    .populate("assignedHeadQuarters", "headQuarterName location")
+    .sort({ firstName: 1, lastName: 1 })
+    .lean();
+
+  return reportees.map((reportee) => ({
+    _id: reportee._id,
+    name: `${reportee.firstName || ""} ${reportee.lastName || ""}`.trim(),
+    firstName: reportee.firstName,
+    lastName: reportee.lastName,
+    employeeId: reportee.employeeId,
+    role: reportee.role,
+    assignedHeadQuarters: mapAssignedHeadQuarters(
+      reportee.assignedHeadQuarters || [],
+    ),
+  }));
+};
 
 export const onboardEmployee = async (req, res) => {
   try {
@@ -23,6 +138,7 @@ export const onboardEmployee = async (req, res) => {
       assignedHeadQuarters,
       assignedZones,
     } = req.body;
+    let zoneHeadQuarters = [];
 
     if (
       !firstName ||
@@ -53,6 +169,15 @@ export const onboardEmployee = async (req, res) => {
           message: "At least one zone must be assigned to a zonal manager",
         });
       }
+      zoneHeadQuarters = await HeadQuarter.find(
+        {
+          zone: { $in: assignedZones },
+        },
+        { _id: 1 },
+      ).lean();
+      zoneHeadQuarters = zoneHeadQuarters.map(
+        (headQuarter) => headQuarter?._id,
+      );
     } else {
       // mr / areaManager still use headquarters
       if (role === "mr" && assignedHeadQuarters?.length > 1) {
@@ -84,9 +209,17 @@ export const onboardEmployee = async (req, res) => {
       password,
       role,
       organizationId: req?.organization?.id,
-      assignedHeadQuarters: role === "zonalManager" ? [] : assignedHeadQuarters,
+      assignedHeadQuarters:
+        role === "zonalManager" ? zoneHeadQuarters : assignedHeadQuarters,
       assignedZones: role === "zonalManager" ? assignedZones : [],
     });
+
+    await seedBalancesForEmployee({
+      organizationId: data.organizationId,
+      employeeId: data._id,
+    }).catch((error) =>
+      console.error("Failed to seed leave balances on onboard:", error),
+    );
 
     sendMail(
       "Welcome to the team pls find the credential to log in mobile application",
@@ -98,6 +231,8 @@ export const onboardEmployee = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Employee onboarded successfuly",
+      zoneHeadQuarters: zoneHeadQuarters,
+      role: role,
     });
   } catch (error) {
     console.error("Error in onboarding employee", error);
@@ -222,22 +357,14 @@ export const getEmployeeById = async (req, res) => {
 
     let assignedAreas = [];
 
-    if (employee.role === "zonalManager") {
-      const zoneIds = employee.assignedZones.map((z) => z._id);
-      assignedAreas = await Area.find(
-        { zoneId: { $in: zoneIds }, organizationId: req?.organization?.id },
-        { name: 1, _id: 1 },
-      );
-    } else {
-      const hqIds = employee.assignedHeadQuarters.map((hq) => hq._id);
-      assignedAreas = await Area.find(
-        {
-          headQuarterId: { $in: hqIds },
-          organizationId: req?.organization?.id,
-        },
-        { name: 1, _id: 1 },
-      );
-    }
+    const hqIds = employee.assignedHeadQuarters.map((hq) => hq._id);
+    assignedAreas = await Area.find(
+      {
+        headQuarterId: { $in: hqIds },
+        organizationId: req?.organization?.id,
+      },
+      { name: 1, _id: 1 },
+    );
 
     const areaIds = assignedAreas.map((a) => a._id);
 
@@ -399,29 +526,82 @@ export const updateEmployee = async (req, res) => {
   }
 };
 
+export const getEmployeeProfile = async (req, res) => {
+  try {
+    if (!req.employee) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const employee = await Employee.findById(req.employee._id)
+      .select(
+        "firstName lastName employeeId role phoneNumber email assignedHeadQuarters assignedZones organizationId",
+      )
+      .populate("assignedHeadQuarters", "headQuarterName location")
+      .lean();
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    const [manager, doctors, reportees] = await Promise.all([
+      findImmediateManager(employee),
+      getProfileDoctors(employee),
+      findDirectReportees(employee),
+    ]);
+
+    const profile = {
+      _id: employee._id,
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      employeeId: employee.employeeId,
+      role: employee.role,
+      phone: formatPhone(employee.phoneNumber),
+      email: employee.email,
+      assignedHeadQuarters: mapAssignedHeadQuarters(
+        employee.assignedHeadQuarters || [],
+      ),
+    };
+
+    res.status(200).json({
+      success: true,
+      profile,
+      manager,
+      reportees,
+      doctors,
+    });
+  } catch (error) {
+    console.error("Error fetching employee profile:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch employee profile",
+    });
+  }
+};
+
 export const getAssignedDoctorAndArea = async (req, res) => {
   try {
-    // here we are expecting the employee details in the req object so pls ensure to use auth middleware
+    const organizationId = req.employee.organizationId;
 
-    let areas;
-
-    if (req?.employee?.role === "zonalManager") {
-      areas = await Area.find(
-        { zoneId: { $in: req?.employee?.assignedZones } },
-        { _id: 1, name: 1 },
-      );
-    } else {
-      areas = await Area.find(
-        { headQuarterId: { $in: req?.employee?.assignedHeadQuarters } },
-        { _id: 1, name: 1 },
-      );
-    }
+    let areas = await Area.find(
+      {
+        headQuarterId: { $in: req?.employee?.assignedHeadQuarters },
+        organizationId,
+      },
+      { _id: 1, name: 1, headQuarterId: 1 },
+    ).populate("headQuarterId", "headQuarterName");
 
     const areaId = areas.map((area) => area._id);
 
     const doctors = await Doctor.find(
       {
         areaId: { $in: areaId },
+        organizationId,
       },
       {
         _id: 1,
@@ -480,9 +660,14 @@ export const forgotPassword = async (req, res) => {
       .update(rawToken)
       .digest("hex");
 
-    employee.resetPasswordToken = hashedToken;
-    employee.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
-    await employee.save({ validateBeforeSave: false });
+    const resetExpires = new Date(Date.now() + 60 * 60 * 1000);
+    await Employee.updateOne(
+      { _id: employee._id },
+      {
+        resetPasswordToken: hashedToken,
+        resetPasswordExpires: resetExpires,
+      },
+    );
 
     const resetUrl = `${process.env.FRONTEND_URL}/reportet/employee/reset-password/${rawToken}`;
 
@@ -497,9 +682,10 @@ export const forgotPassword = async (req, res) => {
         { email: employee.email, name: employee.displayName },
       ]);
     } catch (mailError) {
-      employee.resetPasswordToken = null;
-      employee.resetPasswordExpires = null;
-      await employee.save({ validateBeforeSave: false });
+      await Employee.updateOne(
+        { _id: employee._id },
+        { resetPasswordToken: null, resetPasswordExpires: null },
+      );
 
       console.error("Mail send failed:", mailError);
       return res.status(500).json({

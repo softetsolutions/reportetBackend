@@ -1,31 +1,487 @@
+import mongoose from "mongoose";
 import Leave from "../models/Leave.js";
 import Employee from "../models/Employee.js";
-import mongoose from "mongoose";
+import LeaveType from "../models/LeaveType.js";
+import EmployeeLeaveBalance from "../models/EmployeeLeaveBalance.js";
+import { getSubordinateRoles } from "../utils/helperFunction.js";
+import {
+  seedBalancesForLeaveType,
+  ensureEmployeeLeaveBalance,
+  getAvailableLeaveBalance,
+  decrementLeaveBalance,
+  adjustBalancesForQuotaChange,
+} from "../utils/leaveBalance.js";
 
-export const applyLeave = async (req, res) => {
+const DIRECT_REPORT_ROLE = {
+  areaManager: "mr",
+  zonalManager: "areaManager",
+  admin: "zonalManager",
+};
+
+const OTHER_REPORT_ROLES = {
+  areaManager: [],
+  zonalManager: ["mr"],
+  admin: ["areaManager", "mr"],
+};
+
+const LEAVE_POPULATE = [
+  {
+    path: "employeeId",
+    select: "firstName lastName employeeId role assignedHeadQuarters",
+  },
+  { path: "leaveType", select: "name code paid" },
+];
+
+const toObjectIdArray = (ids = []) =>
+  (ids?.toObject?.() ?? ids).map((id) =>
+    id instanceof mongoose.Types.ObjectId
+      ? id
+      : new mongoose.Types.ObjectId(String(id)),
+  );
+
+const buildHqSubsetFilter = (headQuarters) => ({
+  assignedHeadQuarters: {
+    $not: { $elemMatch: { $nin: headQuarters } },
+    $ne: [],
+  },
+});
+
+const getActorContext = (req) => {
+  if (req.organization) {
+    return {
+      kind: "admin",
+      role: "admin",
+      organizationId: req.organization._id || req.organization.id,
+      actorId: req.organization._id || req.organization.id,
+    };
+  }
+
+  if (req.employee) {
+    return {
+      kind: "employee",
+      role: req.employee.role,
+      organizationId: req.employee.organizationId,
+      actorId: req.employee._id,
+      assignedHeadQuarters: toObjectIdArray(req.employee.assignedHeadQuarters),
+    };
+  }
+
+  return null;
+};
+
+const findScopedEmployees = async ({
+  organizationId,
+  roles,
+  assignedHeadQuarters,
+  excludeId,
+}) => {
+  if (!roles?.length) return [];
+
+  const filter = {
+    organizationId,
+    role: { $in: roles },
+    isActive: true,
+  };
+
+  if (excludeId) {
+    filter._id = { $ne: excludeId };
+  }
+
+  if (assignedHeadQuarters) {
+    Object.assign(filter, buildHqSubsetFilter(assignedHeadQuarters));
+  }
+
+  return Employee.find(filter)
+    .select("_id role firstName lastName employeeId")
+    .lean();
+};
+
+const buildLeaveQuery = ({
+  organizationId,
+  employeeIds,
+  status,
+  leaveType,
+  fromDate,
+  toDate,
+}) => {
+  const filter = {
+    organizationId,
+    employeeId: { $in: employeeIds },
+  };
+
+  if (status) filter.status = status;
+  if (leaveType) filter.leaveType = leaveType;
+
+  if (fromDate || toDate) {
+    filter.leaveDate = {};
+    if (fromDate) filter.leaveDate.$gte = new Date(fromDate);
+    if (toDate) {
+      const end = new Date(toDate);
+      end.setHours(23, 59, 59, 999);
+      filter.leaveDate.$lte = end;
+    }
+  }
+
+  return filter;
+};
+
+const canApproveApplicantRole = (actorRole, applicantRole) => {
+  const subordinateRoles = getSubordinateRoles(actorRole, true);
+  if (actorRole === "admin") {
+    return ["mr", "areaManager", "zonalManager"].includes(applicantRole);
+  }
+  return subordinateRoles.includes(applicantRole);
+};
+
+const isEmployeeInActorScope = (employee, actor) => {
+  if (actor.kind === "admin") {
+    return (
+      String(employee.organizationId) === String(actor.organizationId)
+    );
+  }
+
+  const actorHqs = new Set(actor.assignedHeadQuarters.map(String));
+  const employeeHqs = (employee.assignedHeadQuarters || []).map(String);
+
+  if (!employeeHqs.length) return false;
+  return employeeHqs.every((hq) => actorHqs.has(hq));
+};
+
+export const getLeaveTypes = async (req, res) => {
   try {
-    const { leaveType, startDate, endDate, reason } = req.body;
-
-    if (!leaveType || !startDate || !endDate || !reason) {
-      return res.status(422).json({
+    const actor = getActorContext(req);
+    if (!actor) {
+      return res.status(401).json({
         success: false,
-        message: "leaveType, startDate, endDate and reason are required",
+        message: "Unauthorized",
       });
     }
 
-    if (new Date(startDate) > new Date(endDate)) {
+    const includeInactive = req.query.includeInactive === "true";
+    const filter = { organizationId: actor.organizationId };
+    if (!includeInactive) filter.active = true;
+
+    const leaveTypes = await LeaveType.find(filter)
+      .select("-__v")
+      .sort({ name: 1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      leaveTypes,
+    });
+  } catch (error) {
+    console.error("Error fetching leave types:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch leave types",
+    });
+  }
+};
+
+export const createLeaveType = async (req, res) => {
+  try {
+    const organizationId = req.organization._id || req.organization.id;
+    const {
+      name,
+      code,
+      annualQuota,
+      paid,
+      creditWindow = "YEARLY",
+      creditAmount,
+      carryForward = false,
+      maxCarryForward = 0,
+      active = true,
+    } = req.body;
+
+    if (
+      !name?.trim() ||
+      !code?.trim() ||
+      annualQuota === undefined ||
+      annualQuota === null ||
+      typeof paid !== "boolean"
+    ) {
       return res.status(422).json({
         success: false,
-        message: "startDate cannot be after endDate",
+        message: "name, code, annualQuota and paid are required",
+      });
+    }
+
+    if (Number(annualQuota) < 0) {
+      return res.status(422).json({
+        success: false,
+        message: "annualQuota cannot be negative",
+      });
+    }
+
+    const leaveType = await LeaveType.create({
+      organizationId,
+      name: name.trim(),
+      code: code.trim().toUpperCase(),
+      annualQuota: Number(annualQuota),
+      paid,
+      creditWindow,
+      creditAmount:
+        creditAmount === undefined || creditAmount === null
+          ? Number(annualQuota)
+          : Number(creditAmount),
+      carryForward: Boolean(carryForward),
+      maxCarryForward: Number(maxCarryForward) || 0,
+      active: Boolean(active),
+    });
+
+    if (leaveType.active) {
+      await seedBalancesForLeaveType({
+        organizationId,
+        leaveTypeId: leaveType._id,
+        annualQuota: leaveType.annualQuota,
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Leave type created successfully",
+      leaveType,
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Leave type with this name already exists",
+      });
+    }
+    console.error("Error creating leave type:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create leave type",
+    });
+  }
+};
+
+export const updateLeaveType = async (req, res) => {
+  try {
+    const organizationId = req.organization._id || req.organization.id;
+    const { id } = req.params;
+
+    if (!mongoose.isObjectIdOrHexString(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid leave type ID",
+      });
+    }
+
+    const leaveType = await LeaveType.findOne({ _id: id, organizationId });
+    if (!leaveType) {
+      return res.status(404).json({
+        success: false,
+        message: "Leave type not found",
+      });
+    }
+
+    const {
+      name,
+      code,
+      annualQuota,
+      paid,
+      creditWindow,
+      creditAmount,
+      carryForward,
+      maxCarryForward,
+      active,
+    } = req.body;
+
+    const oldQuota = leaveType.annualQuota;
+    const wasActive = leaveType.active;
+
+    if (name !== undefined) leaveType.name = String(name).trim();
+    if (code !== undefined) leaveType.code = String(code).trim().toUpperCase();
+    if (annualQuota !== undefined) {
+      if (Number(annualQuota) < 0) {
+        return res.status(422).json({
+          success: false,
+          message: "annualQuota cannot be negative",
+        });
+      }
+      leaveType.annualQuota = Number(annualQuota);
+    }
+    if (typeof paid === "boolean") leaveType.paid = paid;
+    if (creditWindow !== undefined) leaveType.creditWindow = creditWindow;
+    if (creditAmount !== undefined) leaveType.creditAmount = Number(creditAmount);
+    if (typeof carryForward === "boolean") leaveType.carryForward = carryForward;
+    if (maxCarryForward !== undefined) {
+      leaveType.maxCarryForward = Number(maxCarryForward) || 0;
+    }
+    if (typeof active === "boolean") leaveType.active = active;
+
+    await leaveType.save();
+
+    if (leaveType.annualQuota !== oldQuota) {
+      await adjustBalancesForQuotaChange({
+        organizationId,
+        leaveTypeId: leaveType._id,
+        oldQuota,
+        newQuota: leaveType.annualQuota,
+      });
+    }
+
+    if (!wasActive && leaveType.active) {
+      await seedBalancesForLeaveType({
+        organizationId,
+        leaveTypeId: leaveType._id,
+        annualQuota: leaveType.annualQuota,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Leave type updated successfully",
+      leaveType,
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Leave type with this name already exists",
+      });
+    }
+    console.error("Error updating leave type:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update leave type",
+    });
+  }
+};
+
+export const getMyLeaveBalance = async (req, res) => {
+  try {
+    const organizationId = req.employee.organizationId;
+    const employeeId = req.employee._id;
+
+    const [leaveTypes, balanceDocs, approvedCounts] = await Promise.all([
+      LeaveType.find({ organizationId, active: true })
+        .select("name code paid annualQuota")
+        .sort({ name: 1 })
+        .lean(),
+      EmployeeLeaveBalance.find({ organizationId, employeeId })
+        .select("leaveType balance")
+        .lean(),
+      Leave.aggregate([
+        {
+          $match: {
+            organizationId,
+            employeeId,
+            status: "approved",
+          },
+        },
+        {
+          $group: {
+            _id: "$leaveType",
+            used: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    const balanceByType = new Map(
+      balanceDocs.map((doc) => [String(doc.leaveType), doc]),
+    );
+    const usedByType = new Map(
+      approvedCounts.map((row) => [String(row._id), row.used]),
+    );
+
+    const balances = leaveTypes.map((type) => {
+      const typeId = String(type._id);
+      const balanceDoc = balanceByType.get(typeId);
+      const used = usedByType.get(typeId) ?? 0;
+      const balance =
+        balanceDoc?.balance ?? Math.max(type.annualQuota - used, 0);
+
+      return {
+        leaveType: type,
+        balance,
+        used,
+        annualQuota: type.annualQuota,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      balances,
+    });
+  } catch (error) {
+    console.error("Error fetching leave balance:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch leave balance",
+    });
+  }
+};
+
+export const applyLeave = async (req, res) => {
+  try {
+    const { leaveType, date, reason } = req.body;
+    const organizationId = req.employee.organizationId;
+    const employeeId = req.employee._id;
+
+    if (!leaveType || !date || !reason) {
+      return res.status(422).json({
+        success: false,
+        message: "Leave type, date and reason are required",
+      });
+    }
+
+    if (!mongoose.isObjectIdOrHexString(String(leaveType))) {
+      return res.status(422).json({
+        success: false,
+        message: "Invalid leave type",
+      });
+    }
+
+    if (Number.isNaN(new Date(date).getTime())) {
+      return res.status(422).json({
+        success: false,
+        message: "Invalid leave date",
+      });
+    }
+
+    const leaveTypeDoc = await LeaveType.findOne({
+      _id: leaveType,
+      organizationId,
+      active: true,
+    });
+
+    if (!leaveTypeDoc) {
+      return res.status(422).json({
+        success: false,
+        message: "Leave type not found or inactive",
+      });
+    }
+
+    await ensureEmployeeLeaveBalance({
+      organizationId,
+      employeeId,
+      leaveTypeId: leaveTypeDoc._id,
+      annualQuota: leaveTypeDoc.annualQuota,
+    });
+
+    const availability = await getAvailableLeaveBalance({
+      organizationId,
+      employeeId,
+      leaveTypeId: leaveTypeDoc._id,
+    });
+
+    if (!availability || availability.available < 1) {
+      return res.status(422).json({
+        success: false,
+        message: "Insufficient leave balance",
       });
     }
 
     const leave = await Leave.create({
-      employeeId: req.employee._id,
-      organizationId: req.employee.organizationId,
-      leaveType,
-      startDate,
-      endDate,
+      employeeId,
+      organizationId,
+      leaveType: leaveTypeDoc._id,
+      leaveDate: date,
       reason,
     });
 
@@ -42,9 +498,20 @@ export const applyLeave = async (req, res) => {
 
 export const getMyLeaves = async (req, res) => {
   try {
-    const leaves = await Leave.find({ employeeId: req.employee._id }).sort({
-      createdAt: -1,
+    const { status, leaveType, fromDate, toDate } = req.query;
+
+    const filter = buildLeaveQuery({
+      organizationId: req.employee.organizationId,
+      employeeIds: [req.employee._id],
+      status,
+      leaveType,
+      fromDate,
+      toDate,
     });
+
+    const leaves = await Leave.find(filter)
+      .populate(LEAVE_POPULATE)
+      .sort({ leaveDate: -1, createdAt: -1 });
 
     res.status(200).json({ success: true, leaves });
   } catch (error) {
@@ -54,78 +521,114 @@ export const getMyLeaves = async (req, res) => {
   }
 };
 
-export const getAllLeavesForAdmin = async (req, res) => {
+export const getSubordinateLeaves = async (req, res) => {
   try {
-    const { status, pageNo = 1, limit = 10, role } = req.body;
-
-    const filter = { organizationId: req.organization.id };
-    if (status) filter.status = status;
-
-    if (role) {
-      const employees = await Employee.find({
-        organizationId: req.organization.id,
-        role: role,
-      }).select("_id");
-      filter.employeeId = { $in: employees.map((e) => e._id) };
+    const actor = getActorContext(req);
+    if (!actor) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
     }
 
-    const [leaves, totalCount] = await Promise.all([
-      Leave.find(filter)
-        .populate("employeeId", "firstName lastName employeeId role")
-        .populate("actionBy", "firstName lastName role")
-        .sort({ createdAt: -1 })
-        .skip((pageNo - 1) * limit)
-        .limit(limit),
-      Leave.countDocuments(filter),
+    const directRole = DIRECT_REPORT_ROLE[actor.role];
+    const otherRoles = OTHER_REPORT_ROLES[actor.role] || [];
+
+    if (!directRole) {
+      return res.status(200).json({
+        success: true,
+        message: "You do not have any subordinates",
+        directReports: [],
+        otherReports: [],
+      });
+    }
+
+    const { status, leaveType, fromDate, toDate } = req.query;
+    const scopeHqs =
+      actor.kind === "employee" ? actor.assignedHeadQuarters : undefined;
+
+    const [directEmployees, otherEmployees] = await Promise.all([
+      findScopedEmployees({
+        organizationId: actor.organizationId,
+        roles: [directRole],
+        assignedHeadQuarters: scopeHqs,
+        excludeId: actor.kind === "employee" ? actor.actorId : undefined,
+      }),
+      findScopedEmployees({
+        organizationId: actor.organizationId,
+        roles: otherRoles,
+        assignedHeadQuarters: scopeHqs,
+        excludeId: actor.kind === "employee" ? actor.actorId : undefined,
+      }),
     ]);
 
-    res.status(200).json({ success: true, leaves, totalCount });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch leaves" });
-  }
-};
-export const getLeavesForAreaManager = async (req, res) => {
-  try {
-    const { status, pageNo = 1, limit = 10 } = req.body;
+    const directIds = directEmployees.map((e) => e._id);
+    const otherIds = otherEmployees.map((e) => e._id);
 
-    const manager = await Employee.findById(req.employee._id).select(
-      "assignedHeadQuarters assignedAreas",
-    );
-
-    const subordinates = await Employee.find({
-      organizationId: req.employee.organizationId,
-      role: "mr",
-      assignedHeadQuarters: { $in: manager.assignedHeadQuarters },
-    }).select("_id");
-
-    const subordinateIds = subordinates.map((e) => e._id);
-
-    const filter = {
-      organizationId: req.employee.organizationId,
-      employeeId: { $in: subordinateIds },
-    };
-    if (status) filter.status = status;
-
-    const [leaves, totalCount] = await Promise.all([
-      Leave.find(filter)
-        .populate("employeeId", "firstName lastName employeeId role")
-        .populate("actionBy", "firstName lastName role")
-        .sort({ createdAt: -1 })
-        .skip((pageNo - 1) * limit)
-        .limit(limit),
-      Leave.countDocuments(filter),
+    const [directReports, otherReports] = await Promise.all([
+      directIds.length
+        ? Leave.find(
+            buildLeaveQuery({
+              organizationId: actor.organizationId,
+              employeeIds: directIds,
+              status,
+              leaveType,
+              fromDate,
+              toDate,
+            }),
+          )
+            .populate(LEAVE_POPULATE)
+            .sort({ leaveDate: -1, createdAt: -1 })
+        : [],
+      otherIds.length
+        ? Leave.find(
+            buildLeaveQuery({
+              organizationId: actor.organizationId,
+              employeeIds: otherIds,
+              status,
+              leaveType,
+              fromDate,
+              toDate,
+            }),
+          )
+            .populate(LEAVE_POPULATE)
+            .sort({ leaveDate: -1, createdAt: -1 })
+        : [],
     ]);
 
-    res.status(200).json({ success: true, leaves, totalCount });
+    res.status(200).json({
+      success: true,
+      directReports,
+      otherReports,
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch leaves" });
+    console.error("Error fetching subordinate leaves:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch subordinate leaves",
+    });
   }
 };
 
-export const actionOnLeaveByAdmin = async (req, res) => {
+export const actionOnLeave = async (req, res) => {
   try {
-    const { leaveId } = req.params;
+    const actor = getActorContext(req);
+    if (!actor) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const { id } = req.params;
     const { action, rejectionReason } = req.body;
+
+    if (!mongoose.isObjectIdOrHexString(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid leave ID",
+      });
+    }
 
     if (!["approved", "rejected"].includes(action)) {
       return res.status(422).json({
@@ -134,7 +637,7 @@ export const actionOnLeaveByAdmin = async (req, res) => {
       });
     }
 
-    if (action === "rejected" && !rejectionReason) {
+    if (action === "rejected" && !rejectionReason?.trim()) {
       return res.status(422).json({
         success: false,
         message: "rejectionReason is required when rejecting",
@@ -142,14 +645,15 @@ export const actionOnLeaveByAdmin = async (req, res) => {
     }
 
     const leave = await Leave.findOne({
-      _id: leaveId,
-      organizationId: req.organization.id,
-    });
+      _id: id,
+      organizationId: actor.organizationId,
+    }).populate("employeeId", "role organizationId assignedHeadQuarters");
 
     if (!leave) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Leave not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Leave not found",
+      });
     }
 
     if (leave.status !== "pending") {
@@ -159,206 +663,80 @@ export const actionOnLeaveByAdmin = async (req, res) => {
       });
     }
 
-    leave.status = action;
-    leave.actionBy = req.organization.id;
-    leave.actionByRole = "admin";
-    leave.actionAt = new Date();
-    if (action === "rejected") leave.rejectionReason = rejectionReason;
-
-    await leave.save();
-
-    res.status(200).json({
-      success: true,
-      message: `Leave ${action} successfully`,
-      leave,
-    });
-  } catch (error) {
-    console.error("Error actioning leave:", error);
-    res.status(500).json({ success: false, message: "Failed to action leave" });
-  }
-};
-
-export const actionOnLeaveByAreaManager = async (req, res) => {
-  try {
-    const { leaveId } = req.params;
-    const { action, rejectionReason } = req.body;
-
-    if (!["approved", "rejected"].includes(action)) {
-      return res.status(422).json({
+    const applicant = leave.employeeId;
+    if (!applicant) {
+      return res.status(404).json({
         success: false,
-        message: "action must be approved or rejected",
+        message: "Leave applicant not found",
       });
     }
 
-    if (action === "rejected" && !rejectionReason) {
-      return res.status(422).json({
-        success: false,
-        message: "rejectionReason is required when rejecting",
-      });
-    }
-
-    const manager = await Employee.findById(req.employee._id).select(
-      "assignedHeadQuarters organizationId",
-    );
-
-    const leave = await Leave.findById(leaveId).populate(
-      "employeeId",
-      "assignedHeadQuarters organizationId",
-    );
-
-    if (!leave) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Leave not found" });
-    }
-
-    const sameOrg =
-      leave.employeeId.organizationId.toString() ===
-      manager.organizationId.toString();
-
-    const sharedHQ = leave.employeeId.assignedHeadQuarters.some((hq) =>
-      manager.assignedHeadQuarters
-        .map((h) => h.toString())
-        .includes(hq.toString()),
-    );
-
-    if (!sameOrg || !sharedHQ) {
+    if (!canApproveApplicantRole(actor.role, applicant.role)) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to action this leave",
       });
     }
 
-    if (leave.status !== "pending") {
-      return res.status(409).json({
+    if (!isEmployeeInActorScope(applicant, actor)) {
+      return res.status(403).json({
         success: false,
-        message: `Leave is already ${leave.status}`,
+        message: "You are not authorized to action this leave",
       });
     }
 
+    if (action === "approved") {
+      const leaveTypeDoc = await LeaveType.findOne({
+        _id: leave.leaveType,
+        organizationId: actor.organizationId,
+      });
+
+      if (!leaveTypeDoc) {
+        return res.status(422).json({
+          success: false,
+          message: "Leave type not found",
+        });
+      }
+
+      await ensureEmployeeLeaveBalance({
+        organizationId: actor.organizationId,
+        employeeId: applicant._id,
+        leaveTypeId: leave.leaveType,
+        annualQuota: leaveTypeDoc.annualQuota,
+      });
+
+      const updatedBalance = await decrementLeaveBalance({
+        organizationId: actor.organizationId,
+        employeeId: applicant._id,
+        leaveTypeId: leave.leaveType,
+      });
+
+      if (!updatedBalance) {
+        return res.status(409).json({
+          success: false,
+          message: "Insufficient leave balance to approve",
+        });
+      }
+    }
+
     leave.status = action;
-    leave.actionBy = req.employee._id;
-    leave.actionByRole = "areaManager";
+    leave.approvedBy = actor.actorId;
+    leave.approvedByRole = actor.role;
     leave.actionAt = new Date();
-    if (action === "rejected") leave.rejectionReason = rejectionReason;
+    leave.rejectionReason =
+      action === "rejected" ? rejectionReason.trim() : null;
 
     await leave.save();
+
+    const populated = await Leave.findById(leave._id).populate(LEAVE_POPULATE);
 
     res.status(200).json({
       success: true,
       message: `Leave ${action} successfully`,
-      leave,
+      leave: populated,
     });
   } catch (error) {
-    console.error("Error actioning leave by area manager:", error);
+    console.error("Error actioning leave:", error);
     res.status(500).json({ success: false, message: "Failed to action leave" });
-  }
-};
-
-export const getLeaveSummary = async (req, res) => {
-  try {
-    const organizationId = req.organization.id;
-    const { year } = req.query;
-
-    const todayStr = new Date().toISOString().split("T")[0];
-
-    const matchStage = {
-      organizationId: new mongoose.Types.ObjectId(organizationId),
-    };
-
-    if (year) {
-      const parsedYear = parseInt(year, 10);
-
-      if (Number.isNaN(parsedYear)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid year parameter",
-        });
-      }
-
-      matchStage.$expr = { $eq: [{ $year: "$startDate" }, parsedYear] };
-    }
-
-    const [result] = await Leave.aggregate([
-      { $match: matchStage },
-      {
-        $facet: {
-          monthlyStatusCounts: [
-            {
-              $group: {
-                _id: {
-                  year: { $year: "$startDate" },
-                  month: { $month: "$startDate" },
-                  status: "$status",
-                },
-                count: { $sum: 1 },
-              },
-            },
-            { $sort: { "_id.year": 1, "_id.month": 1 } },
-          ],
-          onLeaveTodayCount: [
-            {
-              $match: {
-                organizationId: new mongoose.Types.ObjectId(organizationId),
-                status: "approved",
-                startDate: { $lte: new Date(todayStr) },
-                endDate: { $gte: new Date(todayStr) },
-              },
-            },
-            { $count: "count" },
-          ],
-        },
-      },
-    ]);
-
-    const monthlyStatusCounts = result.monthlyStatusCounts;
-    const onLeaveToday = result.onLeaveTodayCount[0]?.count ?? 0;
-
-    const monthNames = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ];
-    const grouped = {};
-
-    monthlyStatusCounts.forEach((row) => {
-      const key = `${row._id.year}-${row._id.month}`;
-      if (!grouped[key]) {
-        grouped[key] = {
-          month: `${monthNames[row._id.month - 1]} ${row._id.year}`,
-          _anchor: 0,
-          approved: 0,
-          pending: 0,
-          rejected: 0,
-          _sortKey: row._id.year * 100 + row._id.month,
-        };
-      }
-      if (grouped[key][row._id.status] !== undefined) {
-        grouped[key][row._id.status] = row.count;
-      }
-    });
-
-    const data = Object.values(grouped)
-      .map((row) => ({
-        ...row,
-        leaveTotal: row.approved + row.pending + row.rejected,
-      }))
-      .sort((a, b) => a._sortKey - b._sortKey);
-
-    res.status(200).json({ success: true, data, onLeaveToday });
-  } catch (error) {
-    console.error("Failed to get leave summary", error);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch leave summary" });
   }
 };

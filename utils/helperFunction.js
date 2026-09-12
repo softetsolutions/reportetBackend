@@ -55,9 +55,11 @@ export const getSuperiorRoles = (employeeRole) => {
   return employeeRoleIndex === -1 ? [] : roleOrder.slice(employeeRoleIndex);
 };
 
-export const getSubordinateRoles = (employeeRole) => {
+export const getSubordinateRoles = (employeeRole, exact = false) => {
   const employeeRoleIndex = roleOrder.indexOf(employeeRole);
   return employeeRoleIndex === -1
     ? []
-    : roleOrder.slice(0, employeeRoleIndex + 1);
+    : exact
+      ? roleOrder.slice(0, employeeRoleIndex)
+      : roleOrder.slice(0, employeeRoleIndex + 1);
 };

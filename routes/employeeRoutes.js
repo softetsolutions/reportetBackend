@@ -11,6 +11,7 @@ import {
   resetPassword,
   getSuperiors,
   getSubordinates,
+  getEmployeeProfile,
 } from "../controllers/employeeController.js";
 import {
   getCallAverageReport,
@@ -19,6 +20,7 @@ import {
 
 const router = express.Router();
 
+router.get("/profile", auth, getEmployeeProfile);
 router.get("/getAllEmployeeOptions", orgAuth, getAllEmployeeOptions);
 router.get("/getAssignedDetails", auth, getAssignedDoctorAndArea);
 router.get("/getSuperiors", auth, getSuperiors);
