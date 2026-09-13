@@ -100,6 +100,79 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LeaveBreakdownEntry"
+    TrackingPingPoint:
+      type: object
+      required: [latitude, longitude]
+      properties:
+        latitude: { type: number, example: 19.1197 }
+        longitude: { type: number, example: 72.8468 }
+        accuracy: { type: number }
+        speed: { type: number, description: meters per second }
+        heading: { type: number }
+        battery: { type: number }
+        activity:
+          type: string
+          enum: [still, walking, driving, unknown]
+        timestamp: { type: string, format: date-time }
+    TrackingTimelineItem:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [started, segment, completed]
+        activity:
+          type: string
+          nullable: true
+          enum: [still, walking, driving, unknown, null]
+        title: { type: string }
+        placeName: { type: string, nullable: true }
+        startTime: { type: string, format: date-time, nullable: true }
+        endTime: { type: string, format: date-time, nullable: true }
+        durationSeconds: { type: integer, nullable: true }
+        lat: { type: number, nullable: true }
+        lng: { type: number, nullable: true }
+        meta: { type: object }
+    TrackingTripAnalysis:
+      type: object
+      properties:
+        employee:
+          type: object
+          properties:
+            id: { type: string }
+            employeeId: { type: string }
+            name: { type: string }
+        date: { type: string }
+        trip:
+          type: object
+          properties:
+            id: { type: string }
+            status: { type: string, enum: [active, completed] }
+            totalDistanceMeters: { type: number }
+            durationSeconds: { type: integer }
+            startTime: { type: string, format: date-time }
+            endTime: { type: string, format: date-time }
+        path:
+          type: array
+          items:
+            type: object
+            properties:
+              lat: { type: number }
+              lng: { type: number }
+              timestamp: { type: string, format: date-time }
+              activity: { type: string }
+              speed: { type: number, nullable: true }
+        timeline:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrackingTimelineItem"
+        markers:
+          type: object
+          properties:
+            start: { type: object }
+            end: { type: object }
+            stops:
+              type: array
+              items: { type: object }
 
 security:
   - bearerAuth: []
@@ -1514,3 +1587,281 @@ paths:
       responses:
         "200":
           description: Sent
+
+  /api/tracking/status:
+    get:
+      tags: [Tracking]
+      summary: MR tracking status for today (IST)
+      description: Employee JWT. Returns org+employee flags and today's session status.
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  liveTrackingEnabled: { type: boolean }
+                  orgLiveTrackingEnabled: { type: boolean }
+                  employeeLiveTrackingEnabled: { type: boolean }
+                  sessionStatus:
+                    type: string
+                    enum: [not_started, active, completed]
+                  date: { type: string, example: "2026-09-12" }
+        "403":
+          description: Not an employee token
+
+  /api/tracking/start:
+    post:
+      tags: [Tracking]
+      summary: Start today's MR tracking session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [latitude, longitude]
+              properties:
+                latitude: { type: number }
+                longitude: { type: number }
+      responses:
+        "201":
+          description: Started
+        "200":
+          description: Session already active
+        "400":
+          description: Missing coordinates
+        "403":
+          description: Tracking disabled or not MR
+        "409":
+          description: Today already completed
+
+  /api/tracking/ping:
+    post:
+      tags: [Tracking]
+      summary: Batch GPS pings (rate limit 30/min)
+      description: Accepts a single point or `{ points: PingPoint[] }` (1-200).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                points:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/TrackingPingPoint"
+                latitude: { type: number }
+                longitude: { type: number }
+                accuracy: { type: number }
+                speed: { type: number }
+                heading: { type: number }
+                battery: { type: number }
+                activity:
+                  type: string
+                  enum: [still, walking, driving, unknown]
+                timestamp: { type: string, format: date-time }
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  accepted: { type: integer }
+                  rejected: { type: integer }
+        "400":
+          description: Invalid payload
+        "403":
+          description: Tracking disabled
+        "409":
+          description: No active session
+
+  /api/tracking/end:
+    post:
+      tags: [Tracking]
+      summary: End today's MR tracking session
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                latitude: { type: number }
+                longitude: { type: number }
+      responses:
+        "200":
+          description: Ended
+        "404":
+          description: No active session
+
+  /api/tracking/trip/today:
+    get:
+      tags: [Tracking]
+      summary: Today's trip summary
+      description: Employee sees own trip. Org must pass employeeId.
+      parameters:
+        - in: query
+          name: employeeId
+          schema: { type: string }
+          description: Required for org tokens
+      responses:
+        "200":
+          description: Trip status for today
+        "400":
+          description: employeeId required for org
+
+  /api/tracking/live:
+    get:
+      tags: [Tracking]
+      summary: SSE stream of all live MR locations
+      description: Org JWT via Authorization header or `?token=` for EventSource.
+      parameters:
+        - in: query
+          name: token
+          schema: { type: string }
+          description: Optional JWT for EventSource clients
+      responses:
+        "200":
+          description: text/event-stream (snapshot, mr:started, mr:location, mr:ended)
+
+  /api/tracking/live/{employeeId}:
+    get:
+      tags: [Tracking]
+      summary: SSE stream for one employee
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: token
+          schema: { type: string }
+      responses:
+        "200":
+          description: text/event-stream
+
+  /api/tracking/trips:
+    get:
+      tags: [Tracking]
+      summary: List trips for an employee (date range)
+      parameters:
+        - in: query
+          name: employeeId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: from
+          schema: { type: string, example: "2026-09-01" }
+        - in: query
+          name: to
+          schema: { type: string, example: "2026-09-12" }
+      responses:
+        "200":
+          description: Trip list
+        "400":
+          description: Invalid params
+        "404":
+          description: Employee not found
+
+  /api/tracking/trip:
+    get:
+      tags: [Tracking]
+      summary: Trip analysis for employee + date (path, timeline, markers)
+      parameters:
+        - in: query
+          name: employeeId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: date
+          required: true
+          schema: { type: string, example: "2026-09-12" }
+      responses:
+        "200":
+          description: Trip analysis payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackingTripAnalysis"
+        "400":
+          description: Invalid params
+        "404":
+          description: Trip or employee not found
+
+  /api/tracking/trip/raw:
+    get:
+      tags: [Tracking]
+      summary: Raw GPS points for a trip day
+      parameters:
+        - in: query
+          name: employeeId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: date
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Raw points
+        "404":
+          description: Trip not found
+
+  /api/tracking/employees:
+    get:
+      tags: [Tracking]
+      summary: Tracking employee directory
+      responses:
+        "200":
+          description: Employees with tracking flags and online status
+
+  /api/tracking/org/enable:
+    post:
+      tags: [Tracking]
+      summary: Enable live tracking for the organization
+      responses:
+        "200":
+          description: Enabled
+
+  /api/tracking/org/disable:
+    post:
+      tags: [Tracking]
+      summary: Disable live tracking for the organization
+      responses:
+        "200":
+          description: Disabled
+
+  /api/tracking/employees/{employeeId}/tracking/enable:
+    post:
+      tags: [Tracking]
+      summary: Enable live tracking for one employee
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Enabled
+        "404":
+          description: Employee not found
+
+  /api/tracking/employees/{employeeId}/tracking/disable:
+    post:
+      tags: [Tracking]
+      summary: Disable live tracking for one employee
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Disabled
+        "404":
+          description: Employee not found

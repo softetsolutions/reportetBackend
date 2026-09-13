@@ -21,6 +21,7 @@ import brandingRoutes from "./routes/logoRoutes.js";
 import leaveRoutes from "./routes/leaveRoutes.js";
 import budgetRoutes from "./routes/headQuarterBudgetRoutes.js";
 import zoneRoutes from "./routes/zoneRoutes.js";
+import trackingRoutes from "./routes/tracking.routes.js";
 import { requestLogger } from "./middleware/logger.js";
 import notificationRoutes from "./routes/notificationsRoute.js";
 
@@ -30,7 +31,7 @@ const app = express();
 ["uploads", "uploads/logos", "uploads/exports"].forEach((dir) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
-app.use(express.json({ limit: "10kb" }));
+app.use(express.json({ limit: "256kb" }));
 app.use(cookieParser());
 app.use(requestLogger);
 
@@ -70,6 +71,7 @@ app.use("/api/leaves", leaveRoutes);
 app.use("/api/logo", brandingRoutes);
 app.use("/api/budget", budgetRoutes);
 app.use("/api/zone", zoneRoutes);
+app.use("/api/tracking", trackingRoutes);
 app.use("/api/notifications", notificationRoutes);
 
 export default app;
