@@ -31,7 +31,7 @@ const app = express();
 ["uploads", "uploads/logos", "uploads/exports"].forEach((dir) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
-app.use(express.json({ limit: "10kb" }));
+app.use(express.json({ limit: "256kb" }));
 app.use(cookieParser());
 app.use(requestLogger);
 

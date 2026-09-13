@@ -13,6 +13,7 @@ const employeeSchema = new mongoose.Schema(
     password: { type: String, required: true },
 
     liveTrackingEnabled: { type: Boolean, default: false },
+    liveTrackingEnabledAt: { type: Date, default: null },
     displayName: {
       type: String,
       default: function () {

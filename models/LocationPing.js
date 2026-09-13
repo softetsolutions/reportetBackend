@@ -25,6 +25,11 @@ const locationPingSchema = new mongoose.Schema(
     speed: Number,
     heading: Number,
     battery: Number,
+    activity: {
+      type: String,
+      enum: ["still", "walking", "driving", "unknown"],
+      default: "unknown",
+    },
     timestamp: { type: Date, required: true, default: Date.now },
   },
   {

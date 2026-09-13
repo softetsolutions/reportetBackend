@@ -6,11 +6,14 @@ import Trip from "../models/Trip.js";
 import Employee from "../models/Employee.js";
 import Organization from "../models/Organization.js";
 import { getDistance } from "geolib";
-import { getPlaceNamesForPoints, cacheKey } from "../utils/Reversegeocode.js";
+import { todayKey, isValidDateKey } from "../utils/trackingDate.js";
+import {
+  normalizeActivity,
+  buildTripAnalysis,
+} from "../utils/tripTimeline.js";
 
 const STALE_MS = 5 * 60 * 1000;
 const JITTER_THRESHOLD_METERS = 5;
-const todayKey = (d = new Date()) => d.toISOString().slice(0, 10);
 
 const sseClients = new Map();
 
@@ -40,6 +43,54 @@ const broadcastLiveLocation = (organizationId, employeeId, event, data) => {
   }
 };
 
+const isValidCoord = (latitude, longitude) => {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+};
+
+const getTrackingFlags = async (organizationId, employeeId) => {
+  const [org, employee] = await Promise.all([
+    Organization.findById(organizationId).select("liveTrackingEnabled").lean(),
+    Employee.findById(employeeId).select("liveTrackingEnabled").lean(),
+  ]);
+  const orgLiveTrackingEnabled = !!org?.liveTrackingEnabled;
+  const employeeLiveTrackingEnabled = !!employee?.liveTrackingEnabled;
+  return {
+    orgLiveTrackingEnabled,
+    employeeLiveTrackingEnabled,
+    liveTrackingEnabled: orgLiveTrackingEnabled && employeeLiveTrackingEnabled,
+  };
+};
+
+const assertEmployeeTrackingAllowed = async (organizationId, employeeId) => {
+  const flags = await getTrackingFlags(organizationId, employeeId);
+  if (!flags.orgLiveTrackingEnabled) {
+    return {
+      ok: false,
+      status: 403,
+      message: "Live tracking is not open yet. Wait for admin.",
+      flags,
+    };
+  }
+  if (!flags.employeeLiveTrackingEnabled) {
+    return {
+      ok: false,
+      status: 403,
+      message: "Live tracking is disabled for this employee.",
+      flags,
+    };
+  }
+  return { ok: true, flags };
+};
+
 export const startTracking = async (req, res) => {
   try {
     if (!req.employee) {
@@ -51,19 +102,18 @@ export const startTracking = async (req, res) => {
     const organizationId = req.employee.organizationId;
     const { latitude, longitude } = req.body || {};
 
-    if (latitude == null || longitude == null) {
+    if (!isValidCoord(latitude, longitude)) {
       return res
         .status(400)
         .json({ message: "latitude and longitude are required" });
     }
 
-    const org = await Organization.findById(organizationId)
-      .select("liveTrackingEnabled")
-      .lean();
-    if (!org?.liveTrackingEnabled) {
-      return res
-        .status(403)
-        .json({ message: "Live tracking is not open yet. Wait for admin." });
+    const allowed = await assertEmployeeTrackingAllowed(
+      organizationId,
+      employeeId,
+    );
+    if (!allowed.ok) {
+      return res.status(allowed.status).json({ message: allowed.message });
     }
 
     const date = todayKey();
@@ -158,7 +208,7 @@ export const endTracking = async (req, res) => {
 
     const now = new Date();
     const coords =
-      latitude != null && longitude != null
+      latitude != null && longitude != null && isValidCoord(latitude, longitude)
         ? [Number(longitude), Number(latitude)]
         : undefined;
 
@@ -211,6 +261,14 @@ export const capturePing = async (req, res) => {
     const employeeId = req.employee._id;
     const organizationId = req.employee.organizationId;
 
+    const allowed = await assertEmployeeTrackingAllowed(
+      organizationId,
+      employeeId,
+    );
+    if (!allowed.ok) {
+      return res.status(allowed.status).json({ message: allowed.message });
+    }
+
     const body = req.body || {};
     const points = Array.isArray(body.points) ? body.points : [body];
     if (!points.length || points.length > 200) {
@@ -230,8 +288,12 @@ export const capturePing = async (req, res) => {
     }
 
     const docs = [];
+    let rejected = 0;
     for (const p of points) {
-      if (p.latitude == null || p.longitude == null) continue;
+      if (!isValidCoord(p.latitude, p.longitude)) {
+        rejected += 1;
+        continue;
+      }
       docs.push({
         sessionId: session._id,
         employeeId,
@@ -244,6 +306,7 @@ export const capturePing = async (req, res) => {
         speed: p.speed,
         heading: p.heading,
         battery: p.battery,
+        activity: normalizeActivity(p.activity, p.speed),
         timestamp: p.timestamp ? new Date(p.timestamp) : new Date(),
       });
     }
@@ -254,9 +317,15 @@ export const capturePing = async (req, res) => {
     }
     docs.sort((a, b) => a.timestamp - b.timestamp);
 
-    await LocationPing.insertMany(docs, { ordered: false }).catch((err) => {
+    try {
+      await LocationPing.insertMany(docs, { ordered: false });
+    } catch (err) {
       console.error("capturePing insertMany partial failure:", err.message);
-    });
+      const inserted = err?.insertedDocs?.length;
+      if (!inserted && err?.writeErrors && docs.length === err.writeErrors.length) {
+        return res.status(500).json({ message: "Failed to save location" });
+      }
+    }
 
     const lastKnown = await LiveLocation.findOne({ employeeId }).lean();
     let cursor = lastKnown?.location?.coordinates || null;
@@ -312,18 +381,25 @@ export const capturePing = async (req, res) => {
       coordinates: latest.location.coordinates,
       speed: latest.speed,
       heading: latest.heading,
+      activity: latest.activity,
       timestamp: latest.timestamp,
     });
 
-    res.status(201).json({ success: true, accepted: docs.length });
+    res.status(201).json({
+      success: true,
+      accepted: docs.length,
+      rejected,
+    });
   } catch (err) {
     console.error("capturePing error:", err);
     res.status(500).json({ message: "Failed to save location" });
   }
 };
+
 export const getTodayTrip = async (req, res) => {
   try {
-    let organizationId, employeeId;
+    let organizationId;
+    let employeeId;
 
     if (req.organization) {
       organizationId = req.organization._id;
@@ -345,12 +421,68 @@ export const getTodayTrip = async (req, res) => {
       date,
     }).lean();
     if (!trip) {
-      return res.json({ status: "not_started", trip: null });
+      return res.json({ status: "not_started", date, trip: null });
     }
-    res.json({ status: trip.status, trip });
+    res.json({ status: trip.status, date, trip });
   } catch (err) {
     console.error("getTodayTrip error:", err);
     res.status(500).json({ message: "Failed to fetch today's trip" });
+  }
+};
+
+export const listTrips = async (req, res) => {
+  try {
+    const organizationId = req.organization._id;
+    const { employeeId, from, to } = req.query;
+
+    if (!employeeId || !mongoose.isValidObjectId(employeeId)) {
+      return res.status(400).json({ message: "Valid employeeId is required" });
+    }
+    if (from && !isValidDateKey(from)) {
+      return res.status(400).json({ message: "from must be YYYY-MM-DD" });
+    }
+    if (to && !isValidDateKey(to)) {
+      return res.status(400).json({ message: "to must be YYYY-MM-DD" });
+    }
+
+    const employee = await Employee.findOne({
+      _id: employeeId,
+      organizationId,
+    }).lean();
+    if (!employee) {
+      return res
+        .status(404)
+        .json({ message: "Employee not found in this organization" });
+    }
+
+    const filter = { employeeId, organizationId };
+    if (from || to) {
+      filter.date = {};
+      if (from) filter.date.$gte = from;
+      if (to) filter.date.$lte = to;
+    }
+
+    const trips = await Trip.find(filter)
+      .sort({ date: -1 })
+      .select(
+        "date status totalDistanceMeters durationSeconds startTime endTime",
+      )
+      .lean();
+
+    res.json({
+      trips: trips.map((t) => ({
+        date: t.date,
+        status: t.status,
+        totalDistanceMeters: t.totalDistanceMeters || 0,
+        durationSeconds: t.durationSeconds || 0,
+        tripId: t._id,
+        startTime: t.startTime,
+        endTime: t.endTime,
+      })),
+    });
+  } catch (err) {
+    console.error("listTrips error:", err);
+    res.status(500).json({ message: "Failed to list trips" });
   }
 };
 
@@ -359,7 +491,7 @@ export const getTripByDate = async (req, res) => {
     const organizationId = req.organization._id;
     const { employeeId, date } = req.query;
 
-    if (!employeeId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    if (!employeeId || !date || !isValidDateKey(date)) {
       return res
         .status(400)
         .json({ message: "employeeId and date (YYYY-MM-DD) are required" });
@@ -389,24 +521,18 @@ export const getTripByDate = async (req, res) => {
         .json({ message: "No trip recorded for this date" });
     }
 
+    const session = await TrackingSession.findById(trip.sessionId).lean();
+
     const points = await LocationPing.find({ sessionId: trip.sessionId })
       .sort({ timestamp: 1 })
-      .select("location speed heading timestamp -_id")
+      .select("location speed heading accuracy activity timestamp -_id")
       .lean();
 
-    const path = points.map((p) => ({
-      lat: p.location.coordinates[1],
-      lng: p.location.coordinates[0],
-      speed: p.speed,
-      heading: p.heading,
-      timestamp: p.timestamp,
-    }));
-
-    const placeNameMap = await getPlaceNamesForPoints(path);
-    const pathWithNames = path.map((p) => ({
-      ...p,
-      placeName: placeNameMap.get(cacheKey(p.lat, p.lng)) || null,
-    }));
+    const { path, timeline, markers } = await buildTripAnalysis({
+      points,
+      trip,
+      session,
+    });
 
     res.json({
       employee: {
@@ -416,14 +542,73 @@ export const getTripByDate = async (req, res) => {
         employeeId: employee.employeeId,
       },
       date,
-      trip,
-      path: pathWithNames,
+      trip: {
+        id: trip._id,
+        status: trip.status,
+        totalDistanceMeters: trip.totalDistanceMeters || 0,
+        durationSeconds: trip.durationSeconds || 0,
+        startTime: trip.startTime,
+        endTime: trip.endTime,
+      },
+      path,
+      timeline,
+      markers,
     });
   } catch (err) {
     console.error("getTripByDate error:", err);
     res.status(500).json({ message: "Failed to fetch trip" });
   }
 };
+
+export const getTripRaw = async (req, res) => {
+  try {
+    const organizationId = req.organization._id;
+    const { employeeId, date } = req.query;
+
+    if (!employeeId || !date || !isValidDateKey(date)) {
+      return res
+        .status(400)
+        .json({ message: "employeeId and date (YYYY-MM-DD) are required" });
+    }
+    if (!mongoose.isValidObjectId(employeeId)) {
+      return res.status(400).json({ message: "Invalid employeeId" });
+    }
+
+    const trip = await Trip.findOne({
+      employeeId,
+      organizationId,
+      date,
+    }).lean();
+    if (!trip) {
+      return res
+        .status(404)
+        .json({ message: "No trip recorded for this date" });
+    }
+
+    const points = await LocationPing.find({ sessionId: trip.sessionId })
+      .sort({ timestamp: 1 })
+      .select("location speed heading accuracy activity battery timestamp -_id")
+      .lean();
+
+    res.json({
+      date,
+      points: points.map((p) => ({
+        lat: p.location.coordinates[1],
+        lng: p.location.coordinates[0],
+        speed: p.speed ?? null,
+        heading: p.heading ?? null,
+        accuracy: p.accuracy ?? null,
+        activity: normalizeActivity(p.activity, p.speed),
+        battery: p.battery ?? null,
+        timestamp: p.timestamp,
+      })),
+    });
+  } catch (err) {
+    console.error("getTripRaw error:", err);
+    res.status(500).json({ message: "Failed to fetch raw GPS" });
+  }
+};
+
 export const getLiveLocations = async (req, res) => {
   try {
     const organizationId = req.organization._id;
@@ -432,11 +617,10 @@ export const getLiveLocations = async (req, res) => {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
-      "X-Accel-Buffering": "no", // disables nginx buffering if you're behind it
+      "X-Accel-Buffering": "no",
     });
-    res.flushHeaders();
+    if (typeof res.flushHeaders === "function") res.flushHeaders();
 
-    // send an initial snapshot immediately on connect
     const sendSnapshot = async () => {
       const staleThreshold = new Date(Date.now() - STALE_MS);
       await LiveLocation.updateMany(
@@ -444,8 +628,7 @@ export const getLiveLocations = async (req, res) => {
         { isOnline: false },
       );
 
-      const startOfToday = new Date();
-      startOfToday.setUTCHours(0, 0, 0, 0);
+      const startOfToday = new Date(`${todayKey()}T00:00:00+05:30`);
 
       const locations = await LiveLocation.find({
         organizationId,
@@ -480,6 +663,7 @@ export const getLiveLocations = async (req, res) => {
     }
   }
 };
+
 export const getLiveLocationByEmployee = async (req, res) => {
   try {
     const organizationId = req.organization._id;
@@ -491,7 +675,7 @@ export const getLiveLocationByEmployee = async (req, res) => {
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     });
-    res.flushHeaders();
+    if (typeof res.flushHeaders === "function") res.flushHeaders();
 
     const sendSnapshot = async () => {
       const location = await LiveLocation.findOne({
@@ -528,9 +712,98 @@ export const getLiveLocationByEmployee = async (req, res) => {
     }
   }
 };
-// trackingController.js
 
-// Admin enables tracking for ONE employee
+export const listTrackingEmployees = async (req, res) => {
+  try {
+    const organizationId = req.organization._id;
+
+    const org = await Organization.findById(organizationId)
+      .select("liveTrackingEnabled")
+      .lean();
+
+    const employees = await Employee.find({ organizationId, isActive: true })
+      .select(
+        "firstName lastName displayName employeeId role liveTrackingEnabled",
+      )
+      .lean();
+
+    const lives = await LiveLocation.find({
+      organizationId,
+      employeeId: { $in: employees.map((e) => e._id) },
+    })
+      .select("employeeId isOnline lastPingAt")
+      .lean();
+
+    const liveByEmp = new Map(lives.map((l) => [l.employeeId.toString(), l]));
+
+    res.json({
+      orgLiveTrackingEnabled: !!org?.liveTrackingEnabled,
+      employees: employees.map((e) => {
+        const live = liveByEmp.get(e._id.toString());
+        return {
+          id: e._id,
+          employeeId: e.employeeId,
+          name: e.displayName || `${e.firstName} ${e.lastName}`,
+          role: e.role,
+          liveTrackingEnabled: !!e.liveTrackingEnabled,
+          isOnline: !!live?.isOnline,
+          lastPingAt: live?.lastPingAt || null,
+        };
+      }),
+    });
+  } catch (err) {
+    console.error("listTrackingEmployees error:", err);
+    res.status(500).json({ message: "Failed to list tracking employees" });
+  }
+};
+
+export const enableOrgTracking = async (req, res) => {
+  try {
+    const organizationId = req.organization._id;
+    const org = await Organization.findByIdAndUpdate(
+      organizationId,
+      {
+        liveTrackingEnabled: true,
+        liveTrackingEnabledAt: new Date(),
+      },
+      { new: true },
+    ).select("liveTrackingEnabled liveTrackingEnabledAt");
+
+    res.json({
+      message: "Live tracking enabled for organization",
+      liveTrackingEnabled: !!org.liveTrackingEnabled,
+      liveTrackingEnabledAt: org.liveTrackingEnabledAt,
+    });
+  } catch (err) {
+    console.error("enableOrgTracking error:", err);
+    res.status(500).json({ message: "Failed to enable org live tracking" });
+  }
+};
+
+export const disableOrgTracking = async (req, res) => {
+  try {
+    const organizationId = req.organization._id;
+    const org = await Organization.findByIdAndUpdate(
+      organizationId,
+      { liveTrackingEnabled: false },
+      { new: true },
+    ).select("liveTrackingEnabled");
+
+    await LiveLocation.updateMany(
+      { organizationId, isOnline: true },
+      { isOnline: false },
+    );
+
+    res.json({
+      message: "Live tracking disabled for organization",
+      liveTrackingEnabled: !!org.liveTrackingEnabled,
+    });
+  } catch (err) {
+    console.error("disableOrgTracking error:", err);
+    res.status(500).json({ message: "Failed to disable org live tracking" });
+  }
+};
+
 export const enableEmployeeTracking = async (req, res) => {
   try {
     const organizationId = req.organization._id;
@@ -544,17 +817,13 @@ export const enableEmployeeTracking = async (req, res) => {
       { _id: employeeId, organizationId },
       { liveTrackingEnabled: true, liveTrackingEnabledAt: new Date() },
       { new: true },
-    ).select("liveTrackingEnabled liveTrackingEnabledAt firstName lastName");
+    ).select("liveTrackingEnabled liveTrackingEnabledAt firstName lastName employeeId");
 
     if (!employee) {
       return res
         .status(404)
         .json({ message: "Employee not found in this organization" });
     }
-
-    req.io?.to(`org:${organizationId}`).emit("tracking:employee-enabled", {
-      employeeId,
-    });
 
     res.json({ message: "Live tracking enabled for employee", employee });
   } catch (err) {
@@ -563,7 +832,6 @@ export const enableEmployeeTracking = async (req, res) => {
   }
 };
 
-// Admin disables tracking for ONE employee
 export const disableEmployeeTracking = async (req, res) => {
   try {
     const organizationId = req.organization._id;
@@ -577,7 +845,7 @@ export const disableEmployeeTracking = async (req, res) => {
       { _id: employeeId, organizationId },
       { liveTrackingEnabled: false },
       { new: true },
-    ).select("liveTrackingEnabled firstName lastName");
+    ).select("liveTrackingEnabled firstName lastName employeeId");
 
     if (!employee) {
       return res
@@ -585,9 +853,10 @@ export const disableEmployeeTracking = async (req, res) => {
         .json({ message: "Employee not found in this organization" });
     }
 
-    req.io?.to(`org:${organizationId}`).emit("tracking:employee-disabled", {
-      employeeId,
-    });
+    await LiveLocation.findOneAndUpdate(
+      { employeeId, organizationId },
+      { isOnline: false },
+    );
 
     res.json({ message: "Live tracking disabled for employee", employee });
   } catch (err) {
@@ -606,16 +875,16 @@ export const getTrackingStatus = async (req, res) => {
     const organizationId = req.employee.organizationId;
     const employeeId = req.employee._id;
 
-    const org = await Organization.findById(organizationId)
-      .select("liveTrackingEnabled")
-      .lean();
-
+    const flags = await getTrackingFlags(organizationId, employeeId);
     const date = todayKey();
     const session = await TrackingSession.findOne({ employeeId, date }).lean();
 
     res.json({
-      liveTrackingEnabled: !!org?.liveTrackingEnabled,
+      liveTrackingEnabled: flags.liveTrackingEnabled,
+      orgLiveTrackingEnabled: flags.orgLiveTrackingEnabled,
+      employeeLiveTrackingEnabled: flags.employeeLiveTrackingEnabled,
       sessionStatus: session?.status || "not_started",
+      date,
     });
   } catch (err) {
     console.error("getTrackingStatus error:", err);
