@@ -2,8 +2,6 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import cors from "cors";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 import fs from "fs";
 import yaml from "yamljs";
 import swaggerUi from "swagger-ui-express";
@@ -26,49 +24,38 @@ import { requestLogger } from "./middleware/logger.js";
 import notificationRoutes from "./routes/notificationsRoute.js";
 import payrollRoutes from "./routes/payrollRoutes.js";
 import tourPlanRoutes from "./routes/tourPlanRoutes.js";
-import { createCorsOptions } from "./config/corsOrigins.js";
 
 dotenv.config();
 const app = express();
-const isProd = process.env.NODE_ENV === "production";
 
 ["uploads", "uploads/logos", "uploads/exports"].forEach((dir) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-app.set("trust proxy", 1);
-// Soften helmet for a cross-origin SPA (softetsolutions.com) → API (schoolet.org).
-// Default helmet CORP/COOP + Referrer-Policy can surface as "strict-origin" / CORS blocks.
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" },
-    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
-    crossOriginEmbedderPolicy: false,
-    referrerPolicy: { policy: "no-referrer-when-downgrade" },
-  }),
-);
 app.use(express.json({ limit: "256kb" }));
 app.use(cookieParser());
 app.use(requestLogger);
 
+// Admin SPA (softetsolutions.com) → API (schoolet.org) — keep this simple allowlist.
 app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: isProd ? 1000 : 5000,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { success: false, message: "Too many requests, try again later." },
+  cors({
+    origin: [
+      "https://softetsolutions.com",
+      "https://www.softetsolutions.com",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+      ...(process.env.CORS_ORIGINS || "")
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean),
+    ],
+    credentials: true,
   }),
 );
-
-// Admin on softetsolutions.com → API on schoolet.org (cross-site cookies + CORS)
-app.use(cors(createCorsOptions(isProd)));
 app.use("/uploads", express.static("uploads"));
 
-if (!isProd || process.env.ENABLE_SWAGGER === "true") {
-  const swaggerDocument = yaml.load("./swagger.yaml");
-  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
-}
+const swaggerDocument = yaml.load("./swagger.yaml");
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 app.get("/ping", (req, res) => {
   res.json({
