@@ -26,6 +26,7 @@ import { requestLogger } from "./middleware/logger.js";
 import notificationRoutes from "./routes/notificationsRoute.js";
 import payrollRoutes from "./routes/payrollRoutes.js";
 import tourPlanRoutes from "./routes/tourPlanRoutes.js";
+import { createCorsOptions } from "./config/corsOrigins.js";
 
 dotenv.config();
 const app = express();
@@ -36,7 +37,16 @@ const isProd = process.env.NODE_ENV === "production";
 });
 
 app.set("trust proxy", 1);
-app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+// Soften helmet for a cross-origin SPA (softetsolutions.com) → API (schoolet.org).
+// Default helmet CORP/COOP + Referrer-Policy can surface as "strict-origin" / CORS blocks.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    crossOriginEmbedderPolicy: false,
+    referrerPolicy: { policy: "no-referrer-when-downgrade" },
+  }),
+);
 app.use(express.json({ limit: "256kb" }));
 app.use(cookieParser());
 app.use(requestLogger);
@@ -51,33 +61,8 @@ app.use(
   }),
 );
 
-const defaultOrigins = [
-  "https://softetsolutions.com",
-  "https://www.softetsolutions.com",
-];
-const corsOrigins = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map((o) => o.trim())
-  .filter(Boolean);
-const allowedOrigins = [
-  ...defaultOrigins,
-  ...corsOrigins,
-  ...(isProd ? [] : ["http://localhost:5173"]),
-];
-
-app.use(
-  cors({
-    origin(origin, callback) {
-      // Allow non-browser clients (mobile apps, curl) with no Origin header.
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error("Not allowed by CORS"));
-    },
-    credentials: true,
-  }),
-);
+// Admin on softetsolutions.com → API on schoolet.org (cross-site cookies + CORS)
+app.use(cors(createCorsOptions(isProd)));
 app.use("/uploads", express.static("uploads"));
 
 if (!isProd || process.env.ENABLE_SWAGGER === "true") {
