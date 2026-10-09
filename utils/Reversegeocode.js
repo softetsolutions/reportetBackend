@@ -6,12 +6,12 @@ if (!MAPBOX_TOKEN) {
   );
 }
 
-const cacheKey = (lat, lng) => `${lat.toFixed(4)},${lng.toFixed(4)}`;
+const cacheKey = (lat, lng) => `${lat?.toFixed(4)},${lng?.toFixed(4)}`;
 
 const placeNameCache = new Map();
 
 async function fetchPlaceName(lat, lng) {
-  if (!MAPBOX_TOKEN) return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  if (!MAPBOX_TOKEN) return `${lat?.toFixed(5)}, ${lng?.toFixed(5)}`;
 
   try {
     const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&limit=1&types=poi,address,neighborhood,locality,place`;
@@ -20,18 +20,18 @@ async function fetchPlaceName(lat, lng) {
       console.error(
         `[reverseGeocode] Mapbox request failed: ${resp.status} ${resp.statusText}`,
       );
-      return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      return `${lat?.toFixed(5)}, ${lng?.toFixed(5)}`;
     }
     const data = await resp.json();
     const feature = data?.features?.[0];
     return (
       feature?.place_name ||
       feature?.text ||
-      `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+      `${lat?.toFixed(5)}, ${lng?.toFixed(5)}`
     );
   } catch (err) {
     console.error("[reverseGeocode] lookup error:", err.message);
-    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    return `${lat?.toFixed(5)}, ${lng?.toFixed(5)}`;
   }
 }
 

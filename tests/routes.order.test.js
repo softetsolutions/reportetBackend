@@ -36,10 +36,15 @@ describe("route order", () => {
     assert.ok(hq.methods.includes("post"));
   });
 
-  it("mounts manager leave actions on a distinct path", () => {
+  it("mounts leave summary and subordinate inbox before action", () => {
     const paths = routeEntries(leaveRoutes).map((r) => r.path);
-    assert.ok(paths.includes("/team"));
-    assert.ok(paths.includes("/:leaveId/action/manager"));
+    assert.ok(paths.includes("/getLeaveSummary"));
+    assert.ok(paths.includes("/subordinates"));
+    assert.ok(paths.includes("/:id/action"));
+    assert.ok(
+      paths.indexOf("/getLeaveSummary") < paths.indexOf("/:id/action"),
+    );
+    assert.ok(paths.indexOf("/subordinates") < paths.indexOf("/:id/action"));
   });
 });
 
@@ -48,6 +53,15 @@ describe("route surface", () => {
     const paths = routeEntries(employeeRoutes).map((r) => r.path);
     assert.ok(
       paths.indexOf("/getAssignedDetails") < paths.indexOf("/:employeeId"),
+    );
+  });
+
+  it("exposes employee promote paths before /:employeeId", () => {
+    const paths = routeEntries(employeeRoutes).map((r) => r.path);
+    assert.ok(paths.includes("/:employeeId/promote"));
+    assert.ok(paths.includes("/:employeeId/promotions"));
+    assert.ok(
+      paths.indexOf("/:employeeId/promote") < paths.indexOf("/:employeeId"),
     );
   });
 

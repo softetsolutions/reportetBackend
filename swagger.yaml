@@ -78,6 +78,63 @@ components:
           enum: [areaManager, zonalManager, admin]
         actionAt: { type: string, format: date-time, nullable: true }
         rejectionReason: { type: string, nullable: true }
+    PromotionHistory:
+      type: object
+      properties:
+        _id: { type: string }
+        employeeId: { type: string }
+        organizationId: { type: string }
+        fromRole:
+          type: string
+          enum: [mr, areaManager, zonalManager]
+        toRole:
+          type: string
+          enum: [mr, areaManager, zonalManager]
+        fromHeadQuarters:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: object
+                properties:
+                  _id: { type: string }
+                  headQuarterName: { type: string }
+        toHeadQuarters:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: object
+                properties:
+                  _id: { type: string }
+                  headQuarterName: { type: string }
+        fromZones:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: object
+                properties:
+                  _id: { type: string }
+                  name: { type: string }
+        toZones:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: object
+                properties:
+                  _id: { type: string }
+                  name: { type: string }
+        promotedByKind:
+          type: string
+          enum: [admin, employee]
+        promotedBy: { type: string }
+        promotedByRole:
+          type: string
+          enum: [admin, zonalManager]
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     LeaveBreakdownEntry:
@@ -173,6 +230,65 @@ components:
             stops:
               type: array
               items: { type: object }
+    TourPlanDayPlan:
+      type: object
+      description: One tour entry per working day (areaIds + doctorIds only).
+      properties:
+        date: { type: string, example: "2024-10-18" }
+        areaIds:
+          type: array
+          items: { type: string }
+        doctorIds:
+          type: array
+          items: { type: string }
+    TourPlanCalendarDay:
+      type: object
+      properties:
+        date: { type: string, example: "2024-10-18" }
+        dayOfMonth: { type: integer, example: 18 }
+        dayOfWeek: { type: integer, description: "0=Sunday … 6=Saturday", example: 5 }
+        isSelectable: { type: boolean }
+        isWeeklyOff: { type: boolean }
+        isHoliday: { type: boolean }
+        holidayName: { type: string, nullable: true }
+        planStatus:
+          type: string
+          nullable: true
+          enum: [planned, unplanned, null]
+    TourPlanMonthView:
+      type: object
+      properties:
+        year: { type: integer, example: 2024 }
+        month: { type: integer, example: 10 }
+        status:
+          type: string
+          enum: [draft, submitted, approved, rejected]
+        canEdit: { type: boolean }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        rejectionReason: { type: string, nullable: true }
+        summary:
+          type: object
+          properties:
+            totalWorkingDays: { type: integer, example: 22 }
+            plannedDaysCount: { type: integer, example: 18 }
+        calendar:
+          type: object
+          properties:
+            days:
+              type: array
+              items:
+                $ref: "#/components/schemas/TourPlanCalendarDay"
+        selectedDate: { type: string, nullable: true, example: "2024-10-18" }
+        dayPlans:
+          type: object
+          description: All planned days keyed by YYYY-MM-DD (use for date taps — no separate day-load API).
+          additionalProperties:
+            $ref: "#/components/schemas/TourPlanDayPlan"
+        dayPlan:
+          description: Convenience mirror of dayPlans[selectedDate].
+          oneOf:
+            - $ref: "#/components/schemas/TourPlanDayPlan"
+            - type: "null"
 
 security:
   - bearerAuth: []
@@ -257,6 +373,21 @@ paths:
       responses:
         "200":
           description: JWT with typ org, expires in 7 days
+
+  /api/orgauth/logout:
+    post:
+      tags: [Org Auth]
+      security: []
+      summary: Clear organization orgToken cookie
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Logout successful }
 
   /api/employee/profile:
     get:
@@ -438,6 +569,135 @@ paths:
       responses:
         "200":
           description: Password updated
+
+  /api/employee/{employeeId}/promote:
+    post:
+      tags: [Employee]
+      summary: Promote an employee (immediate)
+      description: |
+        One-step promotion only: `mr` → `areaManager`, or `areaManager` → `zonalManager`.
+
+        **Auth**
+        - Organization admin (`orgToken` / org JWT): both transitions.
+        - Zonal manager (employee JWT): only `mr` → `areaManager`, and only when the MR's
+          current HQs and the final HQs are inside that ZM's assigned headquarters.
+
+        **MR → Area Manager territory**
+        - `assignedHeadQuarters`: replace with this final HQ list, or
+        - `addHeadQuarters`: keep current HQs and add these, or
+        - omit both: keep current HQs only.
+        Do not send both `assignedHeadQuarters` and `addHeadQuarters`.
+        Rejects if any final HQ is already assigned to another active area manager.
+
+        **AM → Zonal Manager territory**
+        - Requires `assignedZones` (admin only).
+        - System derives and stores all headquarters under those zones (same as onboard).
+
+        Writes a PromotionHistory row (from/to role + territories + actor).
+        When leaving MR, disables live tracking and completes any active tracking session.
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toRole]
+              properties:
+                toRole:
+                  type: string
+                  enum: [areaManager, zonalManager]
+                assignedHeadQuarters:
+                  type: array
+                  items: { type: string }
+                  description: Final HQ list for MR → AM (replace mode)
+                addHeadQuarters:
+                  type: array
+                  items: { type: string }
+                  description: Extra HQs for MR → AM (keep current + add)
+                assignedZones:
+                  type: array
+                  items: { type: string }
+                  description: Required for AM → ZM
+            examples:
+              mrToAmReplace:
+                summary: MR → AM with fully new HQ list
+                value:
+                  toRole: areaManager
+                  assignedHeadQuarters: ["64f1hq000000000000000001", "64f1hq000000000000000002"]
+              mrToAmKeepAndAdd:
+                summary: MR → AM keep current HQ and add more
+                value:
+                  toRole: areaManager
+                  addHeadQuarters: ["64f1hq000000000000000002"]
+              amToZm:
+                summary: AM → ZM (admin only)
+                value:
+                  toRole: zonalManager
+                  assignedZones: ["64f1zone0000000000000001"]
+      responses:
+        "200":
+          description: Employee promoted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string }
+                  employee: { type: object }
+                  promotion:
+                    $ref: "#/components/schemas/PromotionHistory"
+        "400":
+          description: Invalid employee ID
+        "401":
+          description: Unauthorized
+        "403":
+          description: Actor not allowed for this promotion
+        "404":
+          description: Employee not found
+        "422":
+          description: Validation failed (step, territory, or HQ already on another AM)
+        "500":
+          description: Failed to promote employee
+
+  /api/employee/{employeeId}/promotions:
+    get:
+      tags: [Employee]
+      summary: Promotion history for an employee
+      description: |
+        Returns append-only promotion records for the employee (newest first).
+        Organization admin or zonal manager (same org).
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Promotion timeline
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  promotions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PromotionHistory"
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Employee not found
+        "500":
+          description: Failed to fetch promotions
 
   /api/employee/{employeeId}:
     get:
@@ -1301,6 +1561,59 @@ paths:
         "500":
           description: Failed to fetch subordinate leaves
 
+  /api/leaves/getLeaveSummary:
+    get:
+      tags: [Leave]
+      summary: Monthly leave dashboard summary (admin)
+      description: |
+        Organization (admin) token only.
+        Returns 12 months of leave request counts for the selected calendar year (IST),
+        broken down by status (approved/pending/rejected) and leave type.
+        Also returns `onLeaveToday` — count of approved leaves whose leaveDate is today (IST).
+      parameters:
+        - in: query
+          name: year
+          schema:
+            type: integer
+            example: 2026
+          description: Calendar year (defaults to current IST year)
+      responses:
+        "200":
+          description: Leave summary for dashboard chart
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  year: { type: integer, example: 2026 }
+                  onLeaveToday: { type: integer, example: 2 }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        month: { type: string, example: Jan }
+                        monthNumber: { type: integer, example: 1 }
+                        approved: { type: integer }
+                        pending: { type: integer }
+                        rejected: { type: integer }
+                        leaveTotal: { type: integer }
+                        leaveTypes:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: { type: string }
+                              code: { type: string }
+                              count: { type: integer }
+        "400":
+          description: Invalid year
+        "401":
+          description: Not authenticated
+        "500":
+          description: Failed to fetch leave summary
+
   /api/leaves/getLeaveReport:
     get:
       tags: [Leave]
@@ -1496,18 +1809,104 @@ paths:
         "200":
           description: Org profile
 
+  /api/notifications/me:
+    get:
+      tags: [Notifications]
+      summary: List my employee notifications
+      description: |
+        Employee JWT. Returns notifications where `recipient` is the logged-in employee
+        (leave / tour-plan action results). Org-level birthday alerts are not included.
+      parameters:
+        - in: query
+          name: unread
+          schema: { type: string, enum: ["true", "false"] }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        "200":
+          description: Employee notification page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  notifications: { type: array, items: { type: object } }
+                  unreadCount: { type: integer }
+        "401":
+          description: Unauthorized
+
+  /api/notifications/me/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all my employee notifications as read
+      responses:
+        "200":
+          description: Updated
+
+  /api/notifications/me/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark one of my notifications as read
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+        "404":
+          description: Not found
+
+  /api/notifications/me/{id}:
+    delete:
+      tags: [Notifications]
+      summary: Delete one of my notifications
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+
   /api/notifications:
     get:
       tags: [Notifications]
-      summary: List notifications
+      summary: List org admin notifications
+      description: |
+        Organization token. Returns org-level alerts (`recipient` is null), e.g. doctor birthday admin alerts.
+      parameters:
+        - in: query
+          name: unread
+          schema: { type: string, enum: ["true", "false"] }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
       responses:
         "200":
           description: Notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications: { type: array, items: { type: object } }
+                  unreadCount: { type: integer }
 
   /api/notifications/read-all:
     patch:
       tags: [Notifications]
-      summary: Mark all as read
+      summary: Mark all org admin notifications as read
       responses:
         "200":
           description: Updated
@@ -1515,7 +1914,7 @@ paths:
   /api/notifications/{id}/read:
     patch:
       tags: [Notifications]
-      summary: Mark one as read
+      summary: Mark one org notification as read
       parameters:
         - in: path
           name: id
@@ -1528,7 +1927,7 @@ paths:
   /api/notifications/{id}:
     delete:
       tags: [Notifications]
-      summary: Delete notification
+      summary: Delete org notification
       parameters:
         - in: path
           name: id
@@ -1541,15 +1940,24 @@ paths:
   /api/notifications/settings:
     get:
       tags: [Notifications]
-      summary: Notification settings
+      summary: Notification settings (seeds defaults if missing)
       responses:
         "200":
-          description: Settings
+          description: Settings including featureEnabled and events
 
   /api/notifications/settings/toggle:
     patch:
       tags: [Notifications]
-      summary: Toggle notification feature
+      summary: Toggle org notification feature (gates admin birthday alerts)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
       responses:
         "200":
           description: Updated
@@ -1562,7 +1970,14 @@ paths:
         - in: path
           name: eventType
           required: true
-          schema: { type: string }
+          schema:
+            type: string
+            enum:
+              [
+                doctorBirthdayAdminAlert,
+                leaveActionResult,
+                tourPlanActionResult,
+              ]
       responses:
         "200":
           description: Updated
@@ -1584,9 +1999,21 @@ paths:
           name: doctorId
           required: true
           schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subject: { type: string }
+                message: { type: string }
+                notificationId: { type: string }
+                template: { type: object }
       responses:
         "200":
           description: Sent
+        "409":
+          description: Greeting already sent today
 
   /api/tracking/status:
     get:
@@ -1865,3 +2292,851 @@ paths:
           description: Disabled
         "404":
           description: Employee not found
+
+  /api/payroll/settings:
+    get:
+      tags: [Payroll]
+      summary: Get org payroll settings (weekly offs, LOP divisor)
+      description: |
+        Org admin only. Defaults created on first access — weeklyOffWeekdays `[0]` (Sunday),
+        lopDivisorMethod `calendar_days`.
+      responses:
+        "200":
+          description: Settings
+    patch:
+      tags: [Payroll]
+      summary: Update payroll settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                weeklyOffWeekdays:
+                  type: array
+                  items: { type: integer, minimum: 0, maximum: 6 }
+                  description: "0=Sunday … 6=Saturday"
+                lopDivisorMethod:
+                  type: string
+                  enum: [calendar_days, working_days]
+                payslipTemplate:
+                  type: string
+                  enum: [classic, modern, compact]
+                  description: Default salary slip skin for employee mobile/pdf-lib
+      responses:
+        "200":
+          description: Updated
+
+  /api/payroll/me/payslips:
+    get:
+      tags: [Payroll]
+      summary: List my finalized salary slips (employee token)
+      description: |
+        Employee JWT only. Returns finalized payslips for the logged-in employee.
+        Draft / onHold slips are never listed.
+      parameters:
+        - in: query
+          name: year
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Payslip list for mobile home screen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  payslips:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        payslipId: { type: string }
+                        month: { type: integer }
+                        year: { type: integer }
+                        periodLabel: { type: string, example: "April 2026" }
+                        currency: { type: string }
+                        gross: { type: number }
+                        netPay: { type: number }
+                        lopDays: { type: number }
+                        lopAmount: { type: number }
+                        status: { type: string, example: finalized }
+        "401":
+          description: Unauthorized
+
+  /api/payroll/me/payslips/{payslipId}:
+    get:
+      tags: [Payroll]
+      summary: Salary slip layout + data for view and pdf-lib download
+      description: |
+        Employee JWT. Returns `templateId`, `layout` (sections/theme for pdf-lib),
+        and `data` (org branding, earnings, deductions, LOP, net, bank masked).
+        Mobile renders on screen and builds PDF locally — backend does not return a PDF file.
+        Optional `templateId` query overrides org default (`classic`|`modern`|`compact`).
+      parameters:
+        - in: path
+          name: payslipId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: templateId
+          schema:
+            type: string
+            enum: [classic, modern, compact]
+      responses:
+        "200":
+          description: Layout + data payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  templateId: { type: string }
+                  layout: { type: object }
+                  data: { type: object }
+                  availableTemplates:
+                    type: array
+                    items: { type: object }
+        "403":
+          description: Slip not finalized / not available
+        "404":
+          description: Not found
+
+  /api/payroll/payslip-templates:
+    get:
+      tags: [Payroll]
+      summary: List available payslip template metadata
+      description: Employee or org token
+      responses:
+        "200":
+          description: Templates classic / modern / compact
+
+  /api/payroll/holidays:
+    get:
+      tags: [Payroll]
+      summary: List org holidays
+      parameters:
+        - in: query
+          name: year
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Holidays
+    post:
+      tags: [Payroll]
+      summary: Create or update a single holiday by date
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, name]
+              properties:
+                date: { type: string, example: "2026-01-26" }
+                name: { type: string, example: Republic Day }
+      responses:
+        "200":
+          description: Saved
+
+  /api/payroll/holidays/template:
+    get:
+      tags: [Payroll]
+      summary: Download Excel template for bulk holiday upload
+      responses:
+        "200":
+          description: holiday-template.xlsx
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+
+  /api/payroll/holidays/import:
+    post:
+      tags: [Payroll]
+      summary: Bulk upload holidays from Excel
+      description: |
+        Multipart form-data. Field `file` = .xlsx with columns Date, Name.
+        Optional `overwrite` (default true). Set overwrite=false to skip existing dates.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                overwrite: { type: string, example: "true" }
+      responses:
+        "200":
+          description: Import result with created/updated/skipped/errors
+
+  /api/payroll/holidays/bulk:
+    post:
+      tags: [Payroll]
+      summary: Bulk create/update holidays via JSON
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holidays]
+              properties:
+                overwrite: { type: boolean, default: true }
+                holidays:
+                  type: array
+                  items:
+                    type: object
+                    required: [date, name]
+                    properties:
+                      date: { type: string }
+                      name: { type: string }
+      responses:
+        "200":
+          description: Bulk save result
+
+  /api/payroll/holidays/copy-year:
+    post:
+      tags: [Payroll]
+      summary: Clone holidays from one year to another
+      description: |
+        Copies MM-DD from fromYear into toYear. Warns that movable festivals
+        (Diwali, Holi, Eid) must be reviewed after copy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fromYear, toYear]
+              properties:
+                fromYear: { type: integer, example: 2025 }
+                toYear: { type: integer, example: 2026 }
+                overwrite: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Copy result
+        "404":
+          description: No source holidays for fromYear
+
+  /api/payroll/holidays/presets:
+    get:
+      tags: [Payroll]
+      summary: List available holiday country packs
+      responses:
+        "200":
+          description: Preset metadata (india_national)
+
+  /api/payroll/holidays/presets/preview:
+    get:
+      tags: [Payroll]
+      summary: Preview India preset holidays for a year (no write)
+      parameters:
+        - in: query
+          name: year
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: packId
+          schema: { type: string, default: india_national }
+      responses:
+        "200":
+          description: Holiday list that would be applied
+
+  /api/payroll/holidays/presets/apply:
+    post:
+      tags: [Payroll]
+      summary: Apply India national/common holiday preset for a year
+      description: |
+        Seeds fixed national holidays + common dates. Full festival packs exist for
+        2025–2027; other years get fixed-date holidays only. Always review after apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [year]
+              properties:
+                year: { type: integer, example: 2026 }
+                packId: { type: string, default: india_national }
+                overwrite: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Apply result
+
+  /api/payroll/holidays/{holidayId}:
+    delete:
+      tags: [Payroll]
+      summary: Delete a holiday
+      parameters:
+        - in: path
+          name: holidayId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+
+  /api/payroll/employees/{employeeId}/bank-details:
+    get:
+      tags: [Payroll]
+      summary: Get employee bank details
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Bank details or null
+    put:
+      tags: [Payroll]
+      summary: Upsert employee bank details
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountHolderName, accountNumber, ifsc]
+              properties:
+                accountHolderName: { type: string }
+                accountNumber: { type: string }
+                ifsc: { type: string }
+                bankName: { type: string }
+                accountType: { type: string, enum: [savings, current] }
+      responses:
+        "200":
+          description: Saved
+
+  /api/payroll/employees/{employeeId}/salary-structures:
+    get:
+      tags: [Payroll]
+      summary: List salary structure versions for employee
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Structures newest first
+    post:
+      tags: [Payroll]
+      summary: Create a new salary structure version
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [effectiveFrom, earnings]
+              properties:
+                effectiveFrom: { type: string, format: date }
+                currency: { type: string, example: INR }
+                earnings:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      code: { type: string }
+                      label: { type: string }
+                      amount: { type: number }
+                deductions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      code: { type: string }
+                      label: { type: string }
+                      amount: { type: number }
+      responses:
+        "201":
+          description: Created
+
+  /api/payroll/employees/{employeeId}/salary-structures/current:
+    get:
+      tags: [Payroll]
+      summary: Current salary structure as of a date
+      parameters:
+        - in: path
+          name: employeeId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: asOf
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Structure or null
+
+  /api/payroll/runs:
+    get:
+      tags: [Payroll]
+      summary: List payroll runs
+      responses:
+        "200":
+          description: Runs
+    post:
+      tags: [Payroll]
+      summary: Create draft payroll run and generate payslips
+      description: |
+        For each active employee with a salary structure effective in the month:
+        computes attendance from daily visits + approved leaves + weekly offs + holidays,
+        suggests LOP, builds draft payslip. Employees without structure are skipped.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [month, year]
+              properties:
+                month: { type: integer, minimum: 1, maximum: 12 }
+                year: { type: integer }
+      responses:
+        "201":
+          description: Run created
+        "409":
+          description: Run already exists for month
+
+  /api/payroll/runs/{runId}:
+    get:
+      tags: [Payroll]
+      summary: Run detail with payslips and missing bank list
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Run + payslips
+
+  /api/payroll/runs/{runId}/regenerate:
+    post:
+      tags: [Payroll]
+      summary: Regenerate draft payslips (draft runs only)
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Regenerated
+        "409":
+          description: Run is finalized
+
+  /api/payroll/runs/{runId}/finalize:
+    post:
+      tags: [Payroll]
+      summary: Finalize run (locks draft payslips)
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Finalized
+
+  /api/payroll/runs/{runId}/payslips/{payslipId}:
+    get:
+      tags: [Payroll]
+      summary: Payslip detail for admin UI / print
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: payslipId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Payslip + org branding fields
+    patch:
+      tags: [Payroll]
+      summary: Edit draft payslip (LOP waive/hold)
+      description: |
+        Set `finalLopDays` (e.g. 0 to waive all LOP). Set `status` to `onHold` or `draft`.
+        Only on draft runs.
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: payslipId
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                finalLopDays: { type: number }
+                status: { type: string, enum: [draft, onHold] }
+                holdReason: { type: string }
+                adminNote: { type: string }
+      responses:
+        "200":
+          description: Updated
+
+  /api/payroll/runs/{runId}/export/bank-file:
+    get:
+      tags: [Payroll]
+      summary: Download bank salary-credit CSV (finalized only)
+      description: |
+        Columns — Beneficiary Name, Account Number, IFSC, Amount, Payment Type, Narration,
+        Employee Id, Employee Name. Skips on-hold / missing bank / zero net.
+        Response headers `X-Bank-File-Rows`, `X-Bank-File-Skipped`, `X-Bank-File-Skipped-JSON`.
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+        "422":
+          description: Run not finalized
+
+  /api/payroll/runs/{runId}/export/payslips:
+    get:
+      tags: [Payroll]
+      summary: Download payslips Excel summary
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Excel file
+
+  /api/tour-plans/me/month:
+    get:
+      tags: [TourPlan]
+      summary: Monthly tour plan calendar and saved day plans (MR)
+      description: |
+        Employee JWT (`typ: employee`). Returns working-day calendar (Sundays and org holidays
+        are non-selectable), progress summary, `dayPlans` map for the whole month, and
+        `dayPlan` for the selected date. Resolve labels via `GET /api/employee/getAssignedDetails`.
+        On date tap, read `dayPlans[date]` locally — no extra API call.
+      parameters:
+        - in: query
+          name: year
+          required: true
+          schema: { type: integer, example: 2024 }
+        - in: query
+          name: month
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 12, example: 10 }
+        - in: query
+          name: selectedDate
+          required: false
+          schema: { type: string, example: "2024-10-18" }
+      responses:
+        "200":
+          description: Month view
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    $ref: "#/components/schemas/TourPlanMonthView"
+        "422":
+          description: Invalid year or month
+
+  /api/tour-plans/me/day:
+    get:
+      tags: [TourPlan]
+      summary: Tour plan for a single date (MR)
+      description: |
+        Returns planned `areaIds` and `doctorIds` for one date. Tour plan only — does not
+        touch daily visit / reporting. Mobile uses this to prefill the reporting form when
+        the user picks a date. Labels from GET /api/employee/getAssignedDetails.
+      parameters:
+        - in: query
+          name: date
+          required: true
+          schema: { type: string, example: "2024-10-18" }
+      responses:
+        "200":
+          description: Plan for the date (or empty if none)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    properties:
+                      date: { type: string, example: "2024-10-18" }
+                      hasPlan: { type: boolean, example: true }
+                      areaIds:
+                        type: array
+                        items: { type: string }
+                      doctorIds:
+                        type: array
+                        items: { type: string }
+        "422":
+          description: Missing or invalid date
+
+  /api/tour-plans/me/month/days:
+    put:
+      tags: [TourPlan]
+      summary: Bulk save tour plan days for a month (MR)
+      description: |
+        Upserts one entry per date in `days[]`. Dates omitted from the array are unchanged.
+        Each day requires both `areaIds` and `doctorIds` to mark planned, or empty arrays to clear.
+        Returns full month view including `dayPlans`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [year, month, days]
+              properties:
+                year: { type: integer, example: 2024 }
+                month: { type: integer, example: 10 }
+                selectedDate: { type: string, example: "2024-10-18" }
+                days:
+                  type: array
+                  items:
+                    type: object
+                    required: [date, areaIds, doctorIds]
+                    properties:
+                      date: { type: string, example: "2024-10-18" }
+                      areaIds:
+                        type: array
+                        items: { type: string }
+                      doctorIds:
+                        type: array
+                        items: { type: string }
+      responses:
+        "200":
+          description: Full month view with dayPlans
+        "403":
+          description: Month locked
+        "422":
+          description: Validation error
+
+  /api/tour-plans/me/days/{date}:
+    put:
+      tags: [TourPlan]
+      summary: Save one tour entry for a working day (MR)
+      description: |
+        Upserts exactly one plan per date. Send both `areaIds` and `doctorIds` to mark planned;
+        send empty arrays for both to clear the day. Blocked when month status is submitted/approved.
+      parameters:
+        - in: path
+          name: date
+          required: true
+          schema: { type: string, example: "2024-10-18" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [areaIds, doctorIds]
+              properties:
+                areaIds:
+                  type: array
+                  items: { type: string }
+                doctorIds:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Full month view with dayPlans
+        "403":
+          description: Month locked (already submitted)
+        "422":
+          description: Non-working day, invalid ids, or partial area/doctor selection
+
+  /api/tour-plans/me/copy-previous-month:
+    post:
+      tags: [TourPlan]
+      summary: Copy previous month tour plan into the target month (MR)
+      description: |
+        Maps by day-of-month (e.g. Oct 5 ← Sep 5) onto target working days only.
+        Skips non-working days and, by default, days that already have a plan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [year, month]
+              properties:
+                year: { type: integer, example: 2024 }
+                month: { type: integer, example: 10 }
+                overwrite: { type: boolean, default: false }
+                selectedDate: { type: string, example: "2024-10-18" }
+      responses:
+        "200":
+          description: Full month view with dayPlans plus copy stats
+        "404":
+          description: No plan in previous month
+
+  /api/tour-plans/me/submit:
+    post:
+      tags: [TourPlan]
+      summary: Submit monthly tour plan for approval (MR)
+      description: |
+        Sets status to `submitted`. Optional `days[]` saves then submits in one call.
+        Partial months are allowed; response includes `validationWarnings` and full `dayPlans`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [year, month]
+              properties:
+                year: { type: integer, example: 2024 }
+                month: { type: integer, example: 10 }
+                selectedDate: { type: string, example: "2024-10-18" }
+                days:
+                  type: array
+                  description: Optional — bulk save before submit
+                  items:
+                    type: object
+                    required: [date, areaIds, doctorIds]
+                    properties:
+                      date: { type: string, example: "2024-10-18" }
+                      areaIds:
+                        type: array
+                        items: { type: string }
+                      doctorIds:
+                        type: array
+                        items: { type: string }
+      responses:
+        "200":
+          description: Submitted with full month view
+        "403":
+          description: Already submitted
+
+  /api/tour-plans/subordinates:
+    get:
+      tags: [TourPlan]
+      summary: List subordinate tour plans (AM / ZM / org admin)
+      description: |
+        Paginated tour plans for all subordinates (org admin sees all employees).
+        Filter by `status`, `year`, `month`, employee `role`, and `search` / `name`.
+        Each row includes `employee.displayName` and `reportGroup` (`direct` | `other`).
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [draft, submitted, approved, rejected]
+        - in: query
+          name: year
+          schema: { type: integer, example: 2024 }
+        - in: query
+          name: month
+          schema: { type: integer, example: 10 }
+        - in: query
+          name: role
+          schema:
+            type: string
+            enum: [mr, areaManager, zonalManager]
+        - in: query
+          name: search
+          schema: { type: string, example: "Rahul" }
+          description: Search by employee first name, last name, or employeeId
+        - in: query
+          name: name
+          schema: { type: string }
+          description: Alias for search
+        - in: query
+          name: pageNo
+          schema: { type: integer, default: 1, example: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 10, maximum: 50, example: 10 }
+      responses:
+        "200":
+          description: Paginated plans with directReports/otherReports for current page
+        "422":
+          description: Invalid role filter
+
+  /api/tour-plans/subordinates/{planId}:
+    get:
+      tags: [TourPlan]
+      summary: Full tour plan detail for approval review (AM / ZM / org admin)
+      description: |
+        Returns calendar, `days[]` (each day with populated `areas` and `doctors`),
+        and `dayPlans` map keyed by date. Includes employee profile block.
+      parameters:
+        - in: path
+          name: planId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Full enriched month plan
+        "403":
+          description: Out of scope
+
+  /api/tour-plans/{planId}/action:
+    post:
+      tags: [TourPlan]
+      summary: Approve or reject a submitted tour plan (AM / ZM / org admin)
+      description: |
+        Same pattern as POST /api/leaves/{id}/action.
+        `submitted` is the pending state. Reject requires `rejectionReason`.
+      parameters:
+        - in: path
+          name: planId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [approved, rejected]
+                rejectionReason:
+                  type: string
+                  description: Required when action is rejected
+      responses:
+        "200":
+          description: Updated plan
+        "409":
+          description: Plan is not in submitted state
+        "403":
+          description: Not authorized for this employee

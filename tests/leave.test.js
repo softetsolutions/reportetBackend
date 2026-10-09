@@ -302,6 +302,80 @@ describe("actionOnLeave", () => {
   });
 });
 
+describe("getLeaveSummary", () => {
+  it("rejects invalid year", async () => {
+    const res = mockRes();
+    const { getLeaveSummary } = await import(
+      "../controllers/leaveReportController.js"
+    );
+
+    await getLeaveSummary(
+      mockReq({
+        organization: { id: oid() },
+        query: { year: "abc" },
+      }),
+      res,
+    );
+
+    assert.equal(res.statusCode, 400);
+  });
+
+  it("returns monthly status totals and onLeaveToday", async () => {
+    const orgId = oid();
+    const leaveTypeId = oid();
+    const res = mockRes();
+    const { getLeaveSummary } = await import(
+      "../controllers/leaveReportController.js"
+    );
+
+    restores.push(
+      stub(LeaveType, "find", () =>
+        queryChain([{ _id: leaveTypeId, name: "Casual Leave", code: "CL" }]),
+      ),
+      stub(Leave, "find", () =>
+        queryChain([
+          {
+            status: "approved",
+            leaveDate: new Date("2026-03-10T06:00:00.000Z"),
+            leaveType: leaveTypeId,
+          },
+          {
+            status: "pending",
+            leaveDate: new Date("2026-03-15T06:00:00.000Z"),
+            leaveType: leaveTypeId,
+          },
+          {
+            status: "rejected",
+            leaveDate: new Date("2026-04-02T06:00:00.000Z"),
+            leaveType: leaveTypeId,
+          },
+        ]),
+      ),
+      stub(Leave, "countDocuments", async () => 1),
+    );
+
+    await getLeaveSummary(
+      mockReq({
+        organization: { id: orgId },
+        query: { year: 2026 },
+      }),
+      res,
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.success, true);
+    assert.equal(res.body.year, 2026);
+    assert.equal(res.body.onLeaveToday, 1);
+    assert.equal(res.body.data.length, 12);
+    assert.equal(res.body.data[2].month, "Mar");
+    assert.equal(res.body.data[2].approved, 1);
+    assert.equal(res.body.data[2].pending, 1);
+    assert.equal(res.body.data[2].leaveTotal, 2);
+    assert.equal(res.body.data[2].leaveTypes[0].code, "CL");
+    assert.equal(res.body.data[3].rejected, 1);
+  });
+});
+
 describe("getLeaveReport", () => {
   it("requires month and year", async () => {
     const res = mockRes();

@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import Employee from "../models/Employee.js";
 import Leave from "../models/Leave.js";
 import LeaveType from "../models/LeaveType.js";
+import dayjs from "../utils/day.js";
 import {
   getManagerDisplayName,
   preloadManagersForOrg,
@@ -10,6 +11,21 @@ import {
 } from "../utils/employeeManager.js";
 
 const VALID_ROLES = ["mr", "areaManager", "zonalManager"];
+const MONTH_LABELS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+const TZ = "Asia/Kolkata";
 
 const getMonthDateRange = (year, month) => {
   const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
@@ -98,6 +114,121 @@ const buildLeaveBreakdown = (typeCounts, leaveTypes) => {
       days: countsByType.get(String(type._id)) || 0,
     }))
     .filter((entry) => entry.days > 0);
+};
+
+/**
+ * GET /api/leaves/getLeaveSummary?year=
+ * Org admin dashboard chart: monthly leave counts by status + type breakdown.
+ */
+export const getLeaveSummary = async (req, res) => {
+  try {
+    const organizationId = req.organization?._id || req.organization?.id;
+    if (!organizationId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Not authenticated" });
+    }
+
+    const yearRaw = req.query.year;
+    const year = yearRaw === undefined || yearRaw === ""
+      ? dayjs().tz(TZ).year()
+      : Number(yearRaw);
+
+    if (!Number.isInteger(year) || year < 1970 || year > 2100) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid year parameter",
+      });
+    }
+
+    const orgObjectId = new mongoose.Types.ObjectId(organizationId);
+    const yearStart = dayjs.tz(`${year}-01-01`, TZ).startOf("day");
+    const yearEnd = dayjs.tz(`${year}-12-31`, TZ).endOf("day");
+
+    const [leaveTypes, leaves] = await Promise.all([
+      LeaveType.find({ organizationId: orgObjectId })
+        .select("name code")
+        .lean(),
+      Leave.find({
+        organizationId: orgObjectId,
+        leaveDate: { $gte: yearStart.toDate(), $lte: yearEnd.toDate() },
+      })
+        .select("status leaveDate leaveType")
+        .lean(),
+    ]);
+
+    const typeMap = new Map(
+      leaveTypes.map((type) => [String(type._id), type]),
+    );
+
+    const data = MONTH_LABELS.map((month, index) => ({
+      month,
+      monthNumber: index + 1,
+      approved: 0,
+      pending: 0,
+      rejected: 0,
+      leaveTotal: 0,
+      _anchor: 0,
+      leaveTypes: [],
+    }));
+    const typeCountsByMonth = Array.from(
+      { length: 12 },
+      () => new Map(),
+    );
+
+    for (const leave of leaves) {
+      const monthIndex = dayjs(leave.leaveDate).tz(TZ).month();
+      const row = data[monthIndex];
+      if (!row) continue;
+
+      if (
+        leave.status === "approved" ||
+        leave.status === "pending" ||
+        leave.status === "rejected"
+      ) {
+        row[leave.status] += 1;
+      }
+      row.leaveTotal += 1;
+
+      const typeId = String(leave.leaveType);
+      const counts = typeCountsByMonth[monthIndex];
+      counts.set(typeId, (counts.get(typeId) || 0) + 1);
+    }
+
+    for (let i = 0; i < 12; i++) {
+      data[i].leaveTypes = [...typeCountsByMonth[i].entries()]
+        .map(([id, count]) => {
+          const type = typeMap.get(id);
+          return {
+            name: type?.name || "Leave",
+            code: type?.code || "",
+            count,
+          };
+        })
+        .sort((a, b) => b.count - a.count);
+    }
+
+    const todayStart = dayjs().tz(TZ).startOf("day");
+    const todayEnd = todayStart.endOf("day");
+    const onLeaveToday = await Leave.countDocuments({
+      organizationId: orgObjectId,
+      status: "approved",
+      leaveDate: { $gte: todayStart.toDate(), $lte: todayEnd.toDate() },
+    });
+
+    return res.status(200).json({
+      success: true,
+      year,
+      onLeaveToday,
+      data,
+    });
+  } catch (error) {
+    console.error("getLeaveSummary error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch leave summary",
+    });
+  }
 };
 
 export async function buildLeaveReportData({

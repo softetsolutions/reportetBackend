@@ -51,15 +51,15 @@ describe("getAssignedDoctorAndArea", () => {
     let areaFilter;
     let doctorFilter;
     restores.push(
-      stub(Area, "find", async (f) => {
+      stub(Area, "find", (f) => {
         areaFilter = f;
-        return [{ _id: oid(), name: "A1" }];
+        return queryChain([{ _id: oid(), name: "A1" }]);
       }),
     );
     restores.push(
-      stub(Doctor, "find", async (f) => {
+      stub(Doctor, "find", (f) => {
         doctorFilter = f;
-        return [];
+        return queryChain([]);
       }),
     );
     const res = mockRes();

@@ -1,5 +1,5 @@
 import express from "express";
-import { orgAuth, auth } from "../middleware/authMiddleware.js";
+import { orgAuth, auth, authOrOrg } from "../middleware/authMiddleware.js";
 import {
   onboardEmployee,
   paginatedEmployeeList,
@@ -14,6 +14,10 @@ import {
   getEmployeeProfile,
 } from "../controllers/employeeController.js";
 import {
+  promoteEmployee,
+  getEmployeePromotions,
+} from "../controllers/promotionController.js";
+import {
   getCallAverageReport,
   exportCallAverageReport,
 } from "../controllers/callAverageReportController.js";
@@ -27,6 +31,9 @@ router.get("/getSuperiors", auth, getSuperiors);
 router.get("/getSubordinates", auth, getSubordinates);
 router.get("/call-average", orgAuth, getCallAverageReport);
 router.get("/call-average/export", orgAuth, exportCallAverageReport);
+
+router.post("/:employeeId/promote", authOrOrg, promoteEmployee);
+router.get("/:employeeId/promotions", authOrOrg, getEmployeePromotions);
 
 router.get("/:employeeId", orgAuth, getEmployeeById);
 router.patch("/:employeeId", orgAuth, updateEmployee);

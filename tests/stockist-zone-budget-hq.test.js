@@ -110,7 +110,7 @@ describe("budget", () => {
 });
 
 describe("notifications", () => {
-  it("lists notifications for the organization", async () => {
+  it("lists org-level notifications only (recipient null)", async () => {
     const orgId = oid();
     let filter;
     restores.push(
@@ -126,6 +126,7 @@ describe("notifications", () => {
       res,
     );
     assert.equal(String(filter.organizationId), String(orgId));
+    assert.equal(filter.recipient, null);
     assert.equal(res.statusCode, 200);
   });
 
@@ -146,6 +147,35 @@ describe("notifications", () => {
     );
     assert.equal(String(filter.organizationId), String(orgId));
     assert.equal(res.statusCode, 200);
+  });
+
+  it("lists employee notifications by recipient", async () => {
+    const { getMyNotifications } = await import(
+      "../controllers/notificationContoller.js"
+    );
+    const orgId = oid();
+    const employeeId = oid();
+    let filter;
+    restores.push(
+      stub(Notification, "find", (f) => {
+        filter = f;
+        return queryChain([]);
+      }),
+    );
+    restores.push(stub(Notification, "countDocuments", async () => 2));
+    const res = mockRes();
+    await getMyNotifications(
+      mockReq({
+        employee: { _id: employeeId, organizationId: orgId },
+        query: {},
+      }),
+      res,
+    );
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.success, true);
+    assert.equal(String(filter.organizationId), String(orgId));
+    assert.equal(String(filter.recipient), String(employeeId));
+    assert.equal(res.body.unreadCount, 2);
   });
 });
 

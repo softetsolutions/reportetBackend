@@ -1,9 +1,13 @@
 import mongoose from "mongoose";
 import Leave from "../models/Leave.js";
-import Employee from "../models/Employee.js";
 import LeaveType from "../models/LeaveType.js";
 import EmployeeLeaveBalance from "../models/EmployeeLeaveBalance.js";
-import { getSubordinateRoles } from "../utils/helperFunction.js";
+import {
+  getActorContext,
+  resolveSubordinateGroups,
+  parseApprovalAction,
+  assertCanActionEmployee,
+} from "../utils/managerScope.js";
 import {
   seedBalancesForLeaveType,
   ensureEmployeeLeaveBalance,
@@ -12,18 +16,6 @@ import {
   adjustBalancesForQuotaChange,
 } from "../utils/leaveBalance.js";
 
-const DIRECT_REPORT_ROLE = {
-  areaManager: "mr",
-  zonalManager: "areaManager",
-  admin: "zonalManager",
-};
-
-const OTHER_REPORT_ROLES = {
-  areaManager: [],
-  zonalManager: ["mr"],
-  admin: ["areaManager", "mr"],
-};
-
 const LEAVE_POPULATE = [
   {
     path: "employeeId",
@@ -31,70 +23,6 @@ const LEAVE_POPULATE = [
   },
   { path: "leaveType", select: "name code paid" },
 ];
-
-const toObjectIdArray = (ids = []) =>
-  (ids?.toObject?.() ?? ids).map((id) =>
-    id instanceof mongoose.Types.ObjectId
-      ? id
-      : new mongoose.Types.ObjectId(String(id)),
-  );
-
-const buildHqSubsetFilter = (headQuarters) => ({
-  assignedHeadQuarters: {
-    $not: { $elemMatch: { $nin: headQuarters } },
-    $ne: [],
-  },
-});
-
-const getActorContext = (req) => {
-  if (req.organization) {
-    return {
-      kind: "admin",
-      role: "admin",
-      organizationId: req.organization._id || req.organization.id,
-      actorId: req.organization._id || req.organization.id,
-    };
-  }
-
-  if (req.employee) {
-    return {
-      kind: "employee",
-      role: req.employee.role,
-      organizationId: req.employee.organizationId,
-      actorId: req.employee._id,
-      assignedHeadQuarters: toObjectIdArray(req.employee.assignedHeadQuarters),
-    };
-  }
-
-  return null;
-};
-
-const findScopedEmployees = async ({
-  organizationId,
-  roles,
-  assignedHeadQuarters,
-  excludeId,
-}) => {
-  if (!roles?.length) return [];
-
-  const filter = {
-    organizationId,
-    role: { $in: roles },
-    isActive: true,
-  };
-
-  if (excludeId) {
-    filter._id = { $ne: excludeId };
-  }
-
-  if (assignedHeadQuarters) {
-    Object.assign(filter, buildHqSubsetFilter(assignedHeadQuarters));
-  }
-
-  return Employee.find(filter)
-    .select("_id role firstName lastName employeeId")
-    .lean();
-};
 
 const buildLeaveQuery = ({
   organizationId,
@@ -123,28 +51,6 @@ const buildLeaveQuery = ({
   }
 
   return filter;
-};
-
-const canApproveApplicantRole = (actorRole, applicantRole) => {
-  const subordinateRoles = getSubordinateRoles(actorRole, true);
-  if (actorRole === "admin") {
-    return ["mr", "areaManager", "zonalManager"].includes(applicantRole);
-  }
-  return subordinateRoles.includes(applicantRole);
-};
-
-const isEmployeeInActorScope = (employee, actor) => {
-  if (actor.kind === "admin") {
-    return (
-      String(employee.organizationId) === String(actor.organizationId)
-    );
-  }
-
-  const actorHqs = new Set(actor.assignedHeadQuarters.map(String));
-  const employeeHqs = (employee.assignedHeadQuarters || []).map(String);
-
-  if (!employeeHqs.length) return false;
-  return employeeHqs.every((hq) => actorHqs.has(hq));
 };
 
 export const getLeaveTypes = async (req, res) => {
@@ -531,10 +437,8 @@ export const getSubordinateLeaves = async (req, res) => {
       });
     }
 
-    const directRole = DIRECT_REPORT_ROLE[actor.role];
-    const otherRoles = OTHER_REPORT_ROLES[actor.role] || [];
-
-    if (!directRole) {
+    const groups = await resolveSubordinateGroups(actor);
+    if (!groups.hasSubordinates) {
       return res.status(200).json({
         success: true,
         message: "You do not have any subordinates",
@@ -544,26 +448,8 @@ export const getSubordinateLeaves = async (req, res) => {
     }
 
     const { status, leaveType, fromDate, toDate } = req.query;
-    const scopeHqs =
-      actor.kind === "employee" ? actor.assignedHeadQuarters : undefined;
-
-    const [directEmployees, otherEmployees] = await Promise.all([
-      findScopedEmployees({
-        organizationId: actor.organizationId,
-        roles: [directRole],
-        assignedHeadQuarters: scopeHqs,
-        excludeId: actor.kind === "employee" ? actor.actorId : undefined,
-      }),
-      findScopedEmployees({
-        organizationId: actor.organizationId,
-        roles: otherRoles,
-        assignedHeadQuarters: scopeHqs,
-        excludeId: actor.kind === "employee" ? actor.actorId : undefined,
-      }),
-    ]);
-
-    const directIds = directEmployees.map((e) => e._id);
-    const otherIds = otherEmployees.map((e) => e._id);
+    const directIds = groups.directEmployees.map((e) => e._id);
+    const otherIds = groups.otherEmployees.map((e) => e._id);
 
     const [directReports, otherReports] = await Promise.all([
       directIds.length
@@ -621,7 +507,6 @@ export const actionOnLeave = async (req, res) => {
     }
 
     const { id } = req.params;
-    const { action, rejectionReason } = req.body;
 
     if (!mongoose.isObjectIdOrHexString(id)) {
       return res.status(400).json({
@@ -630,17 +515,11 @@ export const actionOnLeave = async (req, res) => {
       });
     }
 
-    if (!["approved", "rejected"].includes(action)) {
+    const parsedAction = parseApprovalAction(req.body);
+    if (parsedAction.error) {
       return res.status(422).json({
         success: false,
-        message: "action must be approved or rejected",
-      });
-    }
-
-    if (action === "rejected" && !rejectionReason?.trim()) {
-      return res.status(422).json({
-        success: false,
-        message: "rejectionReason is required when rejecting",
+        message: parsedAction.error,
       });
     }
 
@@ -671,21 +550,12 @@ export const actionOnLeave = async (req, res) => {
       });
     }
 
-    if (!canApproveApplicantRole(actor.role, applicant.role)) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not authorized to action this leave",
-      });
+    const authError = assertCanActionEmployee(actor, applicant, "leave");
+    if (authError) {
+      return res.status(403).json({ success: false, message: authError });
     }
 
-    if (!isEmployeeInActorScope(applicant, actor)) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not authorized to action this leave",
-      });
-    }
-
-    if (action === "approved") {
+    if (parsedAction.action === "approved") {
       const leaveTypeDoc = await LeaveType.findOne({
         _id: leave.leaveType,
         organizationId: actor.organizationId,
@@ -719,20 +589,54 @@ export const actionOnLeave = async (req, res) => {
       }
     }
 
-    leave.status = action;
+    leave.status = parsedAction.action;
     leave.approvedBy = actor.actorId;
     leave.approvedByRole = actor.role;
     leave.actionAt = new Date();
-    leave.rejectionReason =
-      action === "rejected" ? rejectionReason.trim() : null;
+    leave.rejectionReason = parsedAction.rejectionReason;
 
     await leave.save();
 
     const populated = await Leave.findById(leave._id).populate(LEAVE_POPULATE);
 
+    // Fire-and-forget so approve/reject stays fast if notification infra is slow.
+    void (async () => {
+      try {
+        const { triggerNotification } = await import(
+          "../utils/NotificationService.js"
+        );
+        const { default: dayjs } = await import("../utils/day.js");
+        const dateLabel = dayjs(leave.leaveDate)
+          .tz("Asia/Kolkata")
+          .format("DD MMM YYYY");
+        const approved = parsedAction.action === "approved";
+        await triggerNotification({
+          organizationId: actor.organizationId,
+          eventType: "leaveActionResult",
+          recipient: applicant._id,
+          templateData: {
+            action: parsedAction.action,
+            leaveDate: dateLabel,
+            leaveId: String(leave._id),
+            rejectionReason: parsedAction.rejectionReason || "",
+          },
+          fallbackTitle: approved ? "Leave approved" : "Leave rejected",
+          fallbackMessage: approved
+            ? `Your leave for ${dateLabel} was approved.`
+            : `Your leave for ${dateLabel} was rejected${
+                parsedAction.rejectionReason
+                  ? `: ${parsedAction.rejectionReason}`
+                  : "."
+              }`,
+        });
+      } catch (notifyError) {
+        console.error("leave action notification failed:", notifyError);
+      }
+    })();
+
     res.status(200).json({
       success: true,
-      message: `Leave ${action} successfully`,
+      message: `Leave ${parsedAction.action} successfully`,
       leave: populated,
     });
   } catch (error) {

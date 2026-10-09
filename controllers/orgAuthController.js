@@ -11,6 +11,15 @@ export const generateOrgToken = (id) => {
   });
 };
 
+/** Cross-site cookie options for softetsolutions.com ↔ API host. */
+const orgCookieOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: "none",
+  path: "/",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+};
+
 export const orgRegister = async (req, res) => {
   const { organizationName, email, password } = req.body;
   const hashed = await bcrypt.hash(password, 10);
@@ -26,12 +35,7 @@ export const orgRegister = async (req, res) => {
     await seedDefaultNotificationSettings(org._id);
 
     const token = generateOrgToken(org._id);
-    res.cookie("orgToken", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie("orgToken", token, orgCookieOptions);
 
     res
       .status(201)
@@ -54,13 +58,7 @@ export const orgLogin = async (req, res) => {
     }
 
     const token = generateOrgToken(org._id);
-    res.cookie("orgToken", token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-      path: "/",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie("orgToken", token, orgCookieOptions);
 
     res.status(200).json({
       message: "Login successful",
@@ -70,4 +68,14 @@ export const orgLogin = async (req, res) => {
     console.error("Org Login Error:", error);
     res.status(500).json({ message: "Server error" });
   }
+};
+
+export const orgLogout = (_req, res) => {
+  res.clearCookie("orgToken", {
+    httpOnly: orgCookieOptions.httpOnly,
+    secure: orgCookieOptions.secure,
+    sameSite: orgCookieOptions.sameSite,
+    path: orgCookieOptions.path,
+  });
+  res.status(200).json({ message: "Logout successful" });
 };

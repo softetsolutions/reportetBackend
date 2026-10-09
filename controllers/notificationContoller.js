@@ -3,29 +3,169 @@ import { sendBirthdayMail } from "../config/mailer.js";
 import Doctor from "../models/Doctor.js";
 import NotificationSettings from "../models/NotificationSettings.js";
 
+const parsePageLimit = (query) => {
+  const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
+  const limit = Math.min(
+    Math.max(1, Number.parseInt(query.limit, 10) || 20),
+    50,
+  );
+  return { page, limit, skip: (page - 1) * limit };
+};
+
+/** Org admin inbox — org-level alerts only (recipient is null). */
 export const getNotifications = async (req, res) => {
   try {
-    const { unread, page = 1, limit = 20 } = req.query;
+    const { unread } = req.query;
+    const { page, limit, skip } = parsePageLimit(req.query);
     const organizationId = req.organization._id;
 
-    const filter = { organizationId };
+    const filter = { organizationId, recipient: null };
     if (unread === "true") filter.isRead = false;
 
-    const notifications = await Notification.find(filter)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
+    const [notifications, unreadCount] = await Promise.all([
+      Notification.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Notification.countDocuments({
+        organizationId,
+        recipient: null,
+        isRead: false,
+      }),
+    ]);
 
-    const unreadCount = await Notification.countDocuments({
-      organizationId,
-      isRead: false,
-    });
-
-    res.status(200).json({ notifications, unreadCount });
+    res.status(200).json({ notifications, unreadCount, page, limit });
   } catch (err) {
     res
       .status(500)
       .json({ message: "Failed to fetch notifications", error: err.message });
+  }
+};
+
+/** Employee inbox — notifications addressed to the logged-in employee. */
+export const getMyNotifications = async (req, res) => {
+  try {
+    if (!req.employee) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const { unread } = req.query;
+    const { page, limit, skip } = parsePageLimit(req.query);
+    const organizationId = req.employee.organizationId;
+    const recipient = req.employee._id;
+
+    const filter = { organizationId, recipient };
+    if (unread === "true") filter.isRead = false;
+
+    const [notifications, unreadCount] = await Promise.all([
+      Notification.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Notification.countDocuments({
+        organizationId,
+        recipient,
+        isRead: false,
+      }),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      notifications,
+      unreadCount,
+      page,
+      limit,
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch notifications",
+      error: err.message,
+    });
+  }
+};
+
+export const markMyAsRead = async (req, res) => {
+  try {
+    if (!req.employee) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const notification = await Notification.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        organizationId: req.employee.organizationId,
+        recipient: req.employee._id,
+      },
+      { isRead: true },
+      { new: true },
+    );
+    if (!notification) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Notification not found" });
+    }
+    res.status(200).json({ success: true, notification });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to update notification",
+      error: err.message,
+    });
+  }
+};
+
+export const markMyAllAsRead = async (req, res) => {
+  try {
+    if (!req.employee) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    await Notification.updateMany(
+      {
+        organizationId: req.employee.organizationId,
+        recipient: req.employee._id,
+        isRead: false,
+      },
+      { isRead: true },
+    );
+    res.status(200).json({
+      success: true,
+      message: "All notifications marked as read",
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to update notifications",
+      error: err.message,
+    });
+  }
+};
+
+export const deleteMyNotification = async (req, res) => {
+  try {
+    if (!req.employee) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const deleted = await Notification.findOneAndDelete({
+      _id: req.params.id,
+      organizationId: req.employee.organizationId,
+      recipient: req.employee._id,
+    });
+    if (!deleted) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Notification not found" });
+    }
+    res.status(200).json({ success: true, message: "Notification deleted" });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete notification",
+      error: err.message,
+    });
   }
 };
 

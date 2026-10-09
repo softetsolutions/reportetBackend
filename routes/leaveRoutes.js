@@ -12,6 +12,7 @@ import {
 import {
   getLeaveReport,
   exportLeaveReport,
+  getLeaveSummary,
 } from "../controllers/leaveReportController.js";
 import { auth, authOrOrg, orgAuth } from "../middleware/authMiddleware.js";
 
@@ -27,6 +28,7 @@ router.post("/apply", auth, applyLeave);
 router.get("/my", auth, getMyLeaves);
 
 router.get("/subordinates", authOrOrg, getSubordinateLeaves);
+router.get("/getLeaveSummary", orgAuth, getLeaveSummary);
 router.get("/getLeaveReport", orgAuth, getLeaveReport);
 router.get("/exportLeaveReport", orgAuth, exportLeaveReport);
 router.post("/:id/action", authOrOrg, actionOnLeave);

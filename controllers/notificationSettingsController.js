@@ -1,5 +1,7 @@
-import NotificationSettings from "../models/NotificationSettings.js";
-import { seedDefaultNotificationSettings } from "../utils/NotificationService.js";
+import {
+  EMPLOYEE_NOTIFICATION_EVENTS,
+  ensureNotificationSettings,
+} from "../utils/NotificationService.js";
 
 export const toggleFeature = async (req, res) => {
   try {
@@ -10,13 +12,7 @@ export const toggleFeature = async (req, res) => {
       return res.status(400).json({ message: "enabled must be a boolean" });
     }
 
-    let settings = await NotificationSettings.findOne({
-      organization: organizationId,
-    });
-    if (!settings) {
-      settings = await seedDefaultNotificationSettings(organizationId);
-    }
-
+    const settings = await ensureNotificationSettings(organizationId);
     settings.featureEnabled = enabled;
     await settings.save();
 
@@ -31,14 +27,7 @@ export const toggleFeature = async (req, res) => {
 export const getSettings = async (req, res) => {
   try {
     const organizationId = req.organization._id;
-    let settings = await NotificationSettings.findOne({
-      organization: organizationId,
-    });
-
-    if (!settings) {
-      settings = await seedDefaultNotificationSettings(organizationId);
-    }
-
+    const settings = await ensureNotificationSettings(organizationId);
     res.status(200).json(settings);
   } catch (err) {
     res
@@ -54,14 +43,14 @@ export const updateEventSetting = async (req, res) => {
     const { enabled, channels, emailSubject, sendTime, emailTemplate } =
       req.body;
 
-    let settings = await NotificationSettings.findOne({
-      organization: organizationId,
-    });
-    if (!settings) {
-      settings = await seedDefaultNotificationSettings(organizationId);
-    }
+    const settings = await ensureNotificationSettings(organizationId);
 
-    if (!settings.featureEnabled) {
+    // Org-level alerts (e.g. doctor birthday) need the master toggle.
+    // Employee events (leave / tour-plan results) can be customized anytime.
+    if (
+      !EMPLOYEE_NOTIFICATION_EVENTS.has(eventType) &&
+      !settings.featureEnabled
+    ) {
       return res.status(400).json({
         message:
           "Enable the notification feature before customizing event settings",

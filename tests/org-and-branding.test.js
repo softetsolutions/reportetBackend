@@ -87,3 +87,21 @@ describe("orgLogin", () => {
     assert.equal(res.statusCode, 401);
   });
 });
+
+describe("orgLogout", () => {
+  it("clears orgToken cookie", async () => {
+    const { orgLogout } = await import("../controllers/orgAuthController.js");
+    const res = mockRes();
+    let cleared;
+    res.clearCookie = (name, options) => {
+      cleared = { name, options };
+      return res;
+    };
+
+    orgLogout(mockReq(), res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(cleared.name, "orgToken");
+    assert.equal(res.body.message, "Logout successful");
+  });
+});
